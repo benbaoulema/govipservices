@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 
-enum HomeMode { voyager, colis }
+enum HomeMode { travel, parcels }
 
 class HomeMenuItem {
   const HomeMenuItem({
@@ -25,70 +25,70 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  HomeMode _activeMode = HomeMode.voyager;
-  int _voyagerIndex = 0;
-  int _colisIndex = 0;
+  HomeMode _activeMode = HomeMode.travel;
+  int _travelIndex = 0;
+  int _parcelsIndex = 0;
 
-  static const List<HomeMenuItem> _voyagerItems = [
+  static const List<HomeMenuItem> _travelItems = [
     HomeMenuItem(
       title: 'Ajouter trajet',
       subtitle: 'Publier un nouveau trajet',
-      route: AppRoutes.voyagerAjouterTrajet,
+      route: AppRoutes.travelAddTrip,
       icon: Icons.add_road_outlined,
     ),
     HomeMenuItem(
       title: 'Reserver',
       subtitle: 'Trouver une place disponible',
-      route: AppRoutes.voyagerReserver,
+      route: AppRoutes.travelBookTrip,
       icon: Icons.event_seat_outlined,
     ),
     HomeMenuItem(
       title: 'Mes trajet',
       subtitle: 'Gerer vos trajets',
-      route: AppRoutes.voyagerMesTrajets,
+      route: AppRoutes.travelMyTrips,
       icon: Icons.route_outlined,
     ),
     HomeMenuItem(
       title: 'Messages',
       subtitle: 'Discuter avec passagers et conducteurs',
-      route: AppRoutes.voyagerMessages,
+      route: AppRoutes.travelMessages,
       icon: Icons.chat_bubble_outline,
     ),
   ];
 
-  static const List<HomeMenuItem> _colisItems = [
+  static const List<HomeMenuItem> _parcelsItems = [
     HomeMenuItem(
       title: 'Expedier',
       subtitle: 'Creer et suivre un envoi',
-      route: AppRoutes.colisExpedier,
+      route: AppRoutes.parcelsShipPackage,
       icon: Icons.local_shipping_outlined,
     ),
     HomeMenuItem(
       title: 'Vip shopping',
       subtitle: 'Demander un achat assiste',
-      route: AppRoutes.colisVipShopping,
+      route: AppRoutes.parcelsVipShopping,
       icon: Icons.shopping_bag_outlined,
     ),
     HomeMenuItem(
       title: 'Proposer',
       subtitle: 'Proposer un service de transport',
-      route: AppRoutes.colisProposerService,
+      route: AppRoutes.parcelsOfferService,
       icon: Icons.volunteer_activism_outlined,
     ),
   ];
 
   List<HomeMenuItem> get _activeItems =>
-      _activeMode == HomeMode.voyager ? _voyagerItems : _colisItems;
+      _activeMode == HomeMode.travel ? _travelItems : _parcelsItems;
 
   int get _selectedIndex =>
-      _activeMode == HomeMode.voyager ? _voyagerIndex : _colisIndex;
+      _activeMode == HomeMode.travel ? _travelIndex : _parcelsIndex;
 
   set _selectedIndex(int value) {
-    if (_activeMode == HomeMode.voyager) {
-      _voyagerIndex = value;
+    if (_activeMode == HomeMode.travel) {
+      _travelIndex = value;
       return;
     }
-    _colisIndex = value;
+    _parcelsIndex = value;
   }
 
   void _selectMode(HomeMode mode) {
@@ -112,8 +112,8 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isVoyager = _activeMode == HomeMode.voyager;
-    final Color accent = isVoyager ? const Color(0xFF0B5FFF) : const Color(0xFF0A5C36);
+    final bool isTravel = _activeMode == HomeMode.travel;
+    final Color accent = isTravel ? const Color(0xFF0B5FFF) : const Color(0xFF0A5C36);
     final List<HomeMenuItem> items = _activeItems;
 
     return Scaffold(
@@ -135,17 +135,17 @@ class _HomePageState extends State<HomePage> {
                       Expanded(
                         child: _ModeButton(
                           label: 'Voyager',
-                          selected: isVoyager,
+                          selected: isTravel,
                           selectedColor: const Color(0xFF0B5FFF),
-                          onTap: () => _selectMode(HomeMode.voyager),
+                          onTap: () => _selectMode(HomeMode.travel),
                         ),
                       ),
                       Expanded(
                         child: _ModeButton(
                           label: 'Colis',
-                          selected: !isVoyager,
+                          selected: !isTravel,
                           selectedColor: const Color(0xFF0A5C36),
-                          onTap: () => _selectMode(HomeMode.colis),
+                          onTap: () => _selectMode(HomeMode.parcels),
                         ),
                       ),
                     ],
@@ -162,8 +162,8 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     _HeroPanel(
                       accent: accent,
-                      title: isVoyager ? 'Voyagez en toute confiance' : 'Expediez facilement vos colis',
-                      description: isVoyager
+                      title: isTravel ? 'Voyagez en toute confiance' : 'Expediez facilement vos colis',
+                      description: isTravel
                           ? 'Publiez un trajet, reservez rapidement et restez connecte avec vos voyageurs.'
                           : 'Choisissez le service adapte: expedition, shopping VIP ou proposition de transport.',
                     ),

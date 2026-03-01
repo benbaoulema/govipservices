@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:govipservices/app/presentation/home_page.dart';
 import 'package:govipservices/app/router/app_routes.dart';
-import 'package:govipservices/features/colis/presentation/pages/expedier_page.dart';
-import 'package:govipservices/features/colis/presentation/pages/proposer_service_page.dart';
-import 'package:govipservices/features/colis/presentation/pages/vip_shopping_page.dart';
-import 'package:govipservices/features/voyager/presentation/pages/ajouter_trajet_page.dart';
-import 'package:govipservices/features/voyager/presentation/pages/messages_page.dart';
-import 'package:govipservices/features/voyager/presentation/pages/mes_trajets_page.dart';
-import 'package:govipservices/features/voyager/presentation/pages/reserver_page.dart';
+import 'package:govipservices/features/parcels/presentation/pages/offer_service_page.dart';
+import 'package:govipservices/features/parcels/presentation/pages/ship_package_page.dart';
+import 'package:govipservices/features/parcels/presentation/pages/vip_shopping_page.dart';
+import 'package:govipservices/features/travel/presentation/pages/add_trip_page.dart';
+import 'package:govipservices/features/travel/presentation/pages/book_trip_page.dart';
+import 'package:govipservices/features/travel/presentation/pages/messages_page.dart';
+import 'package:govipservices/features/travel/presentation/pages/my_trips_page.dart';
 
 class AppRouter {
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -17,37 +17,37 @@ class AppRouter {
           builder: (_) => const HomePage(),
           settings: settings,
         );
-      case AppRoutes.colisExpedier:
+      case AppRoutes.parcelsShipPackage:
         return MaterialPageRoute<void>(
-          builder: (_) => const ExpedierPage(),
+          builder: (_) => const ShipPackagePage(),
           settings: settings,
         );
-      case AppRoutes.colisVipShopping:
+      case AppRoutes.parcelsVipShopping:
         return MaterialPageRoute<void>(
           builder: (_) => const VipShoppingPage(),
           settings: settings,
         );
-      case AppRoutes.colisProposerService:
+      case AppRoutes.parcelsOfferService:
         return MaterialPageRoute<void>(
-          builder: (_) => const ProposerServicePage(),
+          builder: (_) => const OfferServicePage(),
           settings: settings,
         );
-      case AppRoutes.voyagerAjouterTrajet:
+      case AppRoutes.travelAddTrip:
         return MaterialPageRoute<void>(
-          builder: (_) => const AjouterTrajetPage(),
+          builder: (_) => const AddTripPage(),
           settings: settings,
         );
-      case AppRoutes.voyagerReserver:
+      case AppRoutes.travelBookTrip:
         return MaterialPageRoute<void>(
-          builder: (_) => const ReserverPage(),
+          builder: (_) => const BookTripPage(),
           settings: settings,
         );
-      case AppRoutes.voyagerMesTrajets:
+      case AppRoutes.travelMyTrips:
         return MaterialPageRoute<void>(
-          builder: (_) => const MesTrajetsPage(),
+          builder: (_) => const MyTripsPage(),
           settings: settings,
         );
-      case AppRoutes.voyagerMessages:
+      case AppRoutes.travelMessages:
         return MaterialPageRoute<void>(
           builder: (_) => const MessagesPage(),
           settings: settings,

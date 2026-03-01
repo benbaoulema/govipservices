@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:govipservices/shared/widgets/feature_placeholder_page.dart';
 
-class ExpedierPage extends StatelessWidget {
-  const ExpedierPage({super.key});
+class OfferServicePage extends StatelessWidget {
+  const OfferServicePage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return const FeaturePlaceholderPage(
-      title: 'Expedier',
+      title: 'Proposer un service',
       description:
-          'Ecran dedie a la creation dun envoi: adresses, colis, prix, paiement et suivi.',
+          'Ecran pour publier une offre de transport: zone, tarif, capacite et disponibilite.',
     );
   }
 }

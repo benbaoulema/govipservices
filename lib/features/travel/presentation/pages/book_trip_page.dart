@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:govipservices/shared/widgets/feature_placeholder_page.dart';
 
-class ProposerServicePage extends StatelessWidget {
-  const ProposerServicePage({super.key});
+class BookTripPage extends StatelessWidget {
+  const BookTripPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return const FeaturePlaceholderPage(
-      title: 'Proposer un service',
+      title: 'Reserver',
       description:
-          'Ecran pour publier une offre de transport: zone, tarif, capacite et disponibilite.',
+          'Ecran de recherche et reservation des trajets disponibles avec confirmation.',
     );
   }
 }

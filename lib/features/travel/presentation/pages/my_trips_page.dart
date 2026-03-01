@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:govipservices/shared/widgets/feature_placeholder_page.dart';
 
-class MesTrajetsPage extends StatelessWidget {
-  const MesTrajetsPage({super.key});
+class MyTripsPage extends StatelessWidget {
+  const MyTripsPage({super.key});
 
   @override
   Widget build(BuildContext context) {

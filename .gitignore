@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local secrets
+flutter_keys.local.json
+flutter_keys.dev.local.json
+flutter_keys.prod.local.json
+android/app/src/*/google-services.json

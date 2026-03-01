@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:govipservices/shared/widgets/feature_placeholder_page.dart';
 
-class ReserverPage extends StatelessWidget {
-  const ReserverPage({super.key});
+class ShipPackagePage extends StatelessWidget {
+  const ShipPackagePage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return const FeaturePlaceholderPage(
-      title: 'Reserver',
+      title: 'Expedier',
       description:
-          'Ecran de recherche et reservation des trajets disponibles avec confirmation.',
+          'Ecran dedie a la creation dun envoi: adresses, colis, prix, paiement et suivi.',
     );
   }
 }
