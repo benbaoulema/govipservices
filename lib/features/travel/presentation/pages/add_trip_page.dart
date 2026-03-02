@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:govipservices/features/travel/data/google_places_service.dart';
+import 'package:govipservices/features/travel/data/route_stop_suggestion_service.dart';
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
 
 enum _TripStep {
@@ -101,7 +101,9 @@ class AddTripPage extends StatefulWidget {
 class _AddTripPageState extends State<AddTripPage> {
   static const String _googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
   static const LatLng _defaultMapCenter = LatLng(5.3600, -4.0083);
+  static const RouteStopSuggestionService _routeSuggestionService = RouteStopSuggestionService();
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  GoogleMapController? _mapController;
 
   static const List<_TripStep> _steps = [
     _TripStep.departure,
@@ -152,9 +154,18 @@ class _AddTripPageState extends State<AddTripPage> {
   String _tripFrequency = 'none';
   bool _isPublishing = false;
   bool _isResolvingCurrentLocation = false;
+  bool _isLoadingRouteStops = false;
+  bool _hasAttemptedRouteSuggestions = false;
+  bool _showManualStopForm = false;
+  String? _routeStopsError;
+  String? _routeTrafficNote;
+  int? _routeTotalMinutes;
+  List<LatLng> _routePolylinePoints = <LatLng>[];
   _PublishedTrip? _submittedTrip;
 
   final List<_IntermediateStop> _intermediateStops = <_IntermediateStop>[];
+  int get _routeStopsCount =>
+      _intermediateStops.where((s) => s.source == 'route').length;
 
   bool get _isLastStep => _stepIndex == _steps.length - 1;
   int get _seatCount => int.tryParse(_seatsController.text.trim()) ?? 3;
@@ -166,6 +177,17 @@ class _AddTripPageState extends State<AddTripPage> {
     if (from.isEmpty) return 'Vers $to';
     if (to.isEmpty) return 'Depuis $from';
     return '$from -> $to';
+  }
+
+  DateTime? get _departureDateTime {
+    if (_departureDate == null || _departureTime == null) return null;
+    return DateTime(
+      _departureDate!.year,
+      _departureDate!.month,
+      _departureDate!.day,
+      _departureTime!.hour,
+      _departureTime!.minute,
+    );
   }
 
   @override
@@ -228,19 +250,87 @@ class _AddTripPageState extends State<AddTripPage> {
     final LatLng? departure = _departureLatLng;
     final LatLng? arrival = _arrivalLatLng;
     if (departure == null || arrival == null) return <Polyline>{};
+    final List<LatLng> points = _routePolylinePoints.length >= 2
+        ? _routePolylinePoints
+        : <LatLng>[departure, arrival];
 
     return <Polyline>{
       Polyline(
+        polylineId: const PolylineId('trip_line_outline'),
+        points: points,
+        color: Colors.white,
+        width: 10,
+        zIndex: 9,
+      ),
+      Polyline(
         polylineId: const PolylineId('trip_line'),
-        points: <LatLng>[departure, arrival],
-        color: const Color(0xFF0A7B4F),
-        width: 5,
+        points: points,
+        color: const Color(0xFFE11D48),
+        width: 6,
+        geodesic: true,
+        zIndex: 10,
       ),
     };
   }
 
+  void _scheduleMapFit() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fitMapToRoute();
+    });
+  }
+
+  Future<void> _fitMapToRoute() async {
+    final GoogleMapController? controller = _mapController;
+    if (controller == null) return;
+    final LatLng? departure = _departureLatLng;
+    final LatLng? arrival = _arrivalLatLng;
+    if (departure == null || arrival == null) return;
+
+    final List<LatLng> points = _routePolylinePoints.length >= 2
+        ? _routePolylinePoints
+        : <LatLng>[departure, arrival];
+    if (points.isEmpty) return;
+
+    double minLat = points.first.latitude;
+    double maxLat = points.first.latitude;
+    double minLng = points.first.longitude;
+    double maxLng = points.first.longitude;
+    for (final LatLng p in points) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+    }
+
+    if ((maxLat - minLat).abs() < 0.0005) {
+      minLat -= 0.005;
+      maxLat += 0.005;
+    }
+    if ((maxLng - minLng).abs() < 0.0005) {
+      minLng -= 0.005;
+      maxLng += 0.005;
+    }
+
+    final LatLngBounds bounds = LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
+    try {
+      await controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 20));
+    } catch (_) {
+      // Retry once after layout stabilizes.
+      await Future<void>.delayed(const Duration(milliseconds: 160));
+      try {
+        await controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 20));
+      } catch (_) {
+        // Keep current camera if bounds update still fails.
+      }
+    }
+  }
+
   @override
   void dispose() {
+    _mapController?.dispose();
     _departureController.dispose();
     _arrivalController.dispose();
     _seatsController.dispose();
@@ -321,6 +411,14 @@ class _AddTripPageState extends State<AddTripPage> {
     final _TripStep step = _steps[_stepIndex];
     if (step == _TripStep.date && _departureDate == null) {
       Future<void>.delayed(const Duration(milliseconds: 120), _selectDate);
+      return;
+    }
+    if (step == _TripStep.time && _departureTime == null) {
+      Future<void>.delayed(const Duration(milliseconds: 120), () => _selectTime(manualStop: false));
+      return;
+    }
+    if (step == _TripStep.stops) {
+      _refreshRouteStopSuggestions();
     }
   }
 
@@ -331,7 +429,7 @@ class _AddTripPageState extends State<AddTripPage> {
       case _TripStep.arrival:
         return _arrivalFocusNode;
       case _TripStep.seats:
-        return _seatsFocusNode;
+        return null;
       case _TripStep.price:
         return _priceFocusNode;
       case _TripStep.date:
@@ -339,7 +437,7 @@ class _AddTripPageState extends State<AddTripPage> {
       case _TripStep.review:
         return null;
       case _TripStep.stops:
-        return _manualStopFocusNode;
+        return null;
       case _TripStep.driver:
         return _driverFocusNode;
       case _TripStep.vehicle:
@@ -350,9 +448,21 @@ class _AddTripPageState extends State<AddTripPage> {
   }
 
   void _requestStepFocus() {
+    if (_steps[_stepIndex] == _TripStep.price) {
+      _clearDefaultPriceIfNeeded();
+    }
     final FocusNode? node = _focusNodeForStep(_steps[_stepIndex]);
     if (node == null || !mounted) return;
     FocusScope.of(context).requestFocus(node);
+  }
+
+  void _clearDefaultPriceIfNeeded() {
+    final String raw = _priceController.text.trim();
+    final double? parsed = double.tryParse(raw);
+    if (parsed == null || parsed != 0) return;
+    setState(() {
+      _priceController.clear();
+    });
   }
 
   void _decrementSeats() {
@@ -402,6 +512,185 @@ class _AddTripPageState extends State<AddTripPage> {
     final String currentArrival = _arrivalController.text.trim();
     if (currentArrival.length < 5) return;
     _setStepIndex(2, isForward: true);
+  }
+
+  String _timeWithOffset(TimeOfDay base, int minutesOffset) {
+    final int total = (base.hour * 60) + base.minute + minutesOffset;
+    final int normalized = ((total % 1440) + 1440) % 1440;
+    final int hh = normalized ~/ 60;
+    final int mm = normalized % 60;
+    return '${hh.toString().padLeft(2, '0')}:${mm.toString().padLeft(2, '0')}';
+  }
+
+  Future<_RoutePoint> _resolvePointFromAddressIfNeeded(_RoutePoint point) async {
+    if (point.lat != null && point.lng != null) return point;
+    final String query = point.address.trim();
+    if (query.length < 3) return point;
+    try {
+      final List<Location> matches = await locationFromAddress(query);
+      if (matches.isEmpty) return point;
+      final Location best = matches.first;
+      return _RoutePoint(
+        address: point.address,
+        lat: best.latitude,
+        lng: best.longitude,
+      );
+    } catch (_) {
+      return point;
+    }
+  }
+
+  Future<void> _ensureRouteEndpointsGeolocated() async {
+    final _RoutePoint depBefore = _departurePoint;
+    final _RoutePoint arrBefore = _arrivalPoint;
+    final _RoutePoint depAfter = await _resolvePointFromAddressIfNeeded(depBefore);
+    final _RoutePoint arrAfter = await _resolvePointFromAddressIfNeeded(arrBefore);
+
+    if (!mounted) return;
+    final bool depChanged = depAfter.lat != depBefore.lat || depAfter.lng != depBefore.lng;
+    final bool arrChanged = arrAfter.lat != arrBefore.lat || arrAfter.lng != arrBefore.lng;
+    if (!depChanged && !arrChanged) return;
+
+    setState(() {
+      _departurePoint = depAfter;
+      _arrivalPoint = arrAfter;
+    });
+  }
+
+  Future<void> _refreshRouteStopSuggestions() async {
+    await _ensureRouteEndpointsGeolocated();
+    final LatLng? dep = _departureLatLng;
+    final LatLng? arr = _arrivalLatLng;
+    final DateTime? dateTime = _departureDateTime;
+    debugPrint(
+      '[stops] refresh dep=${dep?.latitude},${dep?.longitude} arr=${arr?.latitude},${arr?.longitude} dateTime=$dateTime',
+    );
+    if (dep == null || arr == null || dateTime == null) {
+      debugPrint('[stops] skipped: missing dep/arr/dateTime');
+      final List<String> missing = <String>[
+        if (dep == null) 'depart geolocalise',
+        if (arr == null) 'arrivee geolocalisee',
+        if (_departureDate == null) 'date',
+        if (_departureTime == null) 'heure',
+      ];
+      setState(() {
+        _hasAttemptedRouteSuggestions = true;
+        _routeStopsError = null;
+        _routeStopsError = 'Prerequis manquants: ${missing.join(', ')}.';
+        _routeTrafficNote = null;
+        _routeTotalMinutes = null;
+        _routePolylinePoints = <LatLng>[];
+        _intermediateStops.removeWhere((stop) => stop.source == 'route');
+      });
+      _scheduleMapFit();
+      return;
+    }
+    if (_googleMapsApiKey.trim().isEmpty) {
+      setState(() {
+        _hasAttemptedRouteSuggestions = true;
+        _routeStopsError =
+            'Cle Google Maps absente pour le calcul des suggestions (GOOGLE_MAPS_API_KEY).';
+        _routeTrafficNote = null;
+        _routeTotalMinutes = null;
+        _routePolylinePoints = <LatLng>[];
+        _intermediateStops.removeWhere((stop) => stop.source == 'route');
+      });
+      _scheduleMapFit();
+      return;
+    }
+
+    setState(() {
+      _isLoadingRouteStops = true;
+      _hasAttemptedRouteSuggestions = true;
+      _routeStopsError = null;
+    });
+
+    try {
+      final RouteStopSuggestionResult result = await _routeSuggestionService.suggest(
+        departureLat: dep.latitude,
+        departureLng: dep.longitude,
+        arrivalLat: arr.latitude,
+        arrivalLng: arr.longitude,
+        departureDateTime: dateTime,
+        pricePerSeat: double.tryParse(_priceController.text.trim()) ?? 0,
+        currency: _currency,
+        googleMapsApiKey: _googleMapsApiKey,
+      );
+      debugPrint(
+        '[stops] result status=${result.directionsStatus} usedDirections=${result.usedDirectionsApi} totalMinutes=${result.totalMinutes} stops=${result.stops.length} error=${result.directionsErrorMessage}',
+      );
+
+      if (!mounted) return;
+      setState(() {
+        final Map<String, _IntermediateStop> existing = <String, _IntermediateStop>{
+          for (final _IntermediateStop stop in _intermediateStops) stop.id: stop,
+        };
+        final List<_IntermediateStop> manualStops =
+            _intermediateStops.where((s) => s.source == 'manual').toList(growable: false);
+
+        final TimeOfDay base = _departureTime ?? const TimeOfDay(hour: 8, minute: 0);
+        final List<_IntermediateStop> routeStops = result.stops.map((_stop) {
+          final _IntermediateStop? prev = existing[_stop.id];
+          return _IntermediateStop(
+            id: _stop.id,
+            address: _stop.address,
+            estimatedTime: prev?.estimatedTime ?? _timeWithOffset(base, _stop.etaMinutesFromDeparture),
+            priceFromDeparture: prev?.priceFromDeparture ?? _stop.priceFromDeparture,
+            lat: _stop.lat,
+            lng: _stop.lng,
+            selected: prev?.selected ?? false,
+            source: 'route',
+          );
+        }).toList(growable: false);
+
+        _intermediateStops
+          ..clear()
+          ..addAll(routeStops)
+          ..addAll(manualStops);
+
+        _routeTotalMinutes = result.totalMinutes > 0 ? result.totalMinutes : null;
+        _routePolylinePoints = result.pathPoints
+            .map((p) => LatLng(p.lat, p.lng))
+            .toList(growable: false);
+        _routeTrafficNote = result.totalMinutes > 0
+            ? result.usedDirectionsApi
+                ? 'ETA base sur Google Directions (${result.totalMinutes} min).'
+                : 'ETA estime (${result.totalMinutes} min).'
+            : null;
+        if (routeStops.isEmpty) {
+          final String status = (result.directionsStatus ?? 'UNKNOWN').toUpperCase();
+          final String? googleMessage = result.directionsErrorMessage?.trim();
+          if (status != 'OK') {
+            final String suffix = googleMessage == null || googleMessage.isEmpty
+                ? ''
+                : ' - $googleMessage';
+            _routeStopsError = 'Google Directions status: $status$suffix';
+          } else {
+            _routeStopsError =
+                'Aucune proposition automatique sur ce trajet. Ajoutez un arret manuellement.';
+          }
+        } else {
+          _routeStopsError = null;
+        }
+      });
+      _scheduleMapFit();
+    } catch (_) {
+      debugPrint('[stops] exception while loading suggestions');
+      if (!mounted) return;
+      setState(() {
+        _routeStopsError = 'Impossible de calculer les arrets suggeres.';
+        _routeTrafficNote = null;
+        _routeTotalMinutes = null;
+        _routePolylinePoints = <LatLng>[];
+        _intermediateStops.removeWhere((stop) => stop.source == 'route');
+      });
+      _scheduleMapFit();
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingRouteStops = false;
+      });
+    }
   }
 
   Future<void> _useCurrentLocationForDeparture() async {
@@ -469,6 +758,7 @@ class _AddTripPageState extends State<AddTripPage> {
           lng: position.longitude,
         );
       });
+      _refreshRouteStopSuggestions();
       _autoAdvanceFromDeparture();
     } catch (_) {
       if (!mounted) return;
@@ -497,6 +787,10 @@ class _AddTripPageState extends State<AddTripPage> {
     setState(() {
       _departureDate = picked;
     });
+    _refreshRouteStopSuggestions();
+    if (_stepIndex == _steps.indexOf(_TripStep.date)) {
+      _setStepIndex(_steps.indexOf(_TripStep.time), isForward: true);
+    }
   }
 
   Future<void> _selectTime({required bool manualStop}) async {
@@ -523,6 +817,12 @@ class _AddTripPageState extends State<AddTripPage> {
         _departureTime = picked;
       }
     });
+    if (!manualStop) {
+      _refreshRouteStopSuggestions();
+      if (_stepIndex == _steps.indexOf(_TripStep.time)) {
+        _setStepIndex(_steps.indexOf(_TripStep.stops), isForward: true);
+      }
+    }
   }
 
   String _formatDate(DateTime? value) {
@@ -537,6 +837,32 @@ class _AddTripPageState extends State<AddTripPage> {
     final String hour = value.hour.toString().padLeft(2, '0');
     final String minute = value.minute.toString().padLeft(2, '0');
     return '$hour:$minute';
+  }
+
+  void _updateDepartureAddressText(String value) {
+    final String next = value.trim();
+    final String current = _departurePoint.address.trim();
+    final bool preserveCoords = next.isNotEmpty && next == current;
+    setState(() {
+      _departurePoint = _RoutePoint(
+        address: value,
+        lat: preserveCoords ? _departurePoint.lat : null,
+        lng: preserveCoords ? _departurePoint.lng : null,
+      );
+    });
+  }
+
+  void _updateArrivalAddressText(String value) {
+    final String next = value.trim();
+    final String current = _arrivalPoint.address.trim();
+    final bool preserveCoords = next.isNotEmpty && next == current;
+    setState(() {
+      _arrivalPoint = _RoutePoint(
+        address: value,
+        lat: preserveCoords ? _arrivalPoint.lat : null,
+        lng: preserveCoords ? _arrivalPoint.lng : null,
+      );
+    });
   }
 
   void _addManualStop() {
@@ -564,6 +890,7 @@ class _AddTripPageState extends State<AddTripPage> {
       _manualStopPriceController.text = '0';
       _manualStopTime = null;
       _manualStopPoint = null;
+      _showManualStopForm = false;
     });
   }
 
@@ -579,6 +906,61 @@ class _AddTripPageState extends State<AddTripPage> {
       if (idx < 0) return;
       final _IntermediateStop current = _intermediateStops[idx];
       _intermediateStops[idx] = current.copyWith(selected: !current.selected);
+    });
+  }
+
+  TimeOfDay _parseStopTime(String value) {
+    final List<String> parts = value.split(':');
+    if (parts.length != 2) return const TimeOfDay(hour: 8, minute: 0);
+    final int? hh = int.tryParse(parts[0]);
+    final int? mm = int.tryParse(parts[1]);
+    if (hh == null || mm == null) return const TimeOfDay(hour: 8, minute: 0);
+    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return const TimeOfDay(hour: 8, minute: 0);
+    return TimeOfDay(hour: hh, minute: mm);
+  }
+
+  Future<void> _selectStopTime(String id) async {
+    final int idx = _intermediateStops.indexWhere((s) => s.id == id);
+    if (idx < 0) return;
+    final _IntermediateStop current = _intermediateStops[idx];
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: _parseStopTime(current.estimatedTime),
+      builder: (BuildContext context, Widget? child) {
+        return Localizations.override(
+          context: context,
+          locale: const Locale('fr', 'FR'),
+          child: child,
+        );
+      },
+    );
+    if (picked == null) return;
+    setState(() {
+      _intermediateStops[idx] = current.copyWith(estimatedTime: _formatTime(picked));
+    });
+  }
+
+  void _updateStopPrice(String id, String value) {
+    final int idx = _intermediateStops.indexWhere((s) => s.id == id);
+    if (idx < 0) return;
+    final _IntermediateStop current = _intermediateStops[idx];
+    final double? parsed = double.tryParse(value.trim());
+    if (parsed == null) return;
+    setState(() {
+      _intermediateStops[idx] = current.copyWith(priceFromDeparture: parsed < 0 ? 0 : parsed);
+    });
+  }
+
+  void _adjustStopPrice(String id, {required bool increment}) {
+    final int idx = _intermediateStops.indexWhere((s) => s.id == id);
+    if (idx < 0) return;
+    final _IntermediateStop current = _intermediateStops[idx];
+    final double step = _currency.toUpperCase() == 'EUR' ? 1 : 500;
+    final double next = increment
+        ? current.priceFromDeparture + step
+        : (current.priceFromDeparture - step).clamp(0, double.infinity).toDouble();
+    setState(() {
+      _intermediateStops[idx] = current.copyWith(priceFromDeparture: next);
     });
   }
 
@@ -628,11 +1010,7 @@ class _AddTripPageState extends State<AddTripPage> {
                 labelText: 'Adresse de depart',
                 hintText: 'Ex: Cocody, Abidjan',
                 focusNode: _departureFocusNode,
-                onChanged: (value) {
-                  setState(() {
-                    _departurePoint = _RoutePoint(address: value);
-                  });
-                },
+                onChanged: _updateDepartureAddressText,
                 onSuggestionSelected: (_) => _autoAdvanceFromDeparture(),
                 onPlaceResolved: (PlaceDetailsResult place) {
                   setState(() {
@@ -642,6 +1020,7 @@ class _AddTripPageState extends State<AddTripPage> {
                       lng: place.lng,
                     );
                   });
+                  _refreshRouteStopSuggestions();
                   _autoAdvanceFromDeparture();
                 },
               ),
@@ -671,11 +1050,7 @@ class _AddTripPageState extends State<AddTripPage> {
             labelText: 'Adresse d arrivee',
             hintText: 'Ex: Plateau, Abidjan',
             focusNode: _arrivalFocusNode,
-            onChanged: (value) {
-              setState(() {
-                _arrivalPoint = _RoutePoint(address: value);
-              });
-            },
+            onChanged: _updateArrivalAddressText,
             onSuggestionSelected: (_) => _autoAdvanceFromArrival(),
             onPlaceResolved: (PlaceDetailsResult place) {
               setState(() {
@@ -685,6 +1060,7 @@ class _AddTripPageState extends State<AddTripPage> {
                   lng: place.lng,
                 );
               });
+              _refreshRouteStopSuggestions();
               _autoAdvanceFromArrival();
             },
           ),
@@ -725,6 +1101,7 @@ class _AddTripPageState extends State<AddTripPage> {
                   setState(() {
                     _currency = selection.first;
                   });
+                  _refreshRouteStopSuggestions();
                 },
               ),
               const SizedBox(height: 14),
@@ -732,6 +1109,8 @@ class _AddTripPageState extends State<AddTripPage> {
                 controller: _priceController,
                 focusNode: _priceFocusNode,
                 keyboardType: TextInputType.number,
+                onTap: _clearDefaultPriceIfNeeded,
+                onChanged: (_) => _refreshRouteStopSuggestions(),
                 decoration: _clearableDecoration(
                   labelText: 'Prix par place ($_currency)',
                   controller: _priceController,
@@ -740,6 +1119,7 @@ class _AddTripPageState extends State<AddTripPage> {
                       _priceController.clear();
                     });
                     _priceFocusNode.requestFocus();
+                    _refreshRouteStopSuggestions();
                   },
                 ),
               ),
@@ -793,88 +1173,294 @@ class _AddTripPageState extends State<AddTripPage> {
       case _TripStep.stops:
         return _TripFieldSection(
           title: 'Arrets intermediaires',
-          subtitle: 'Ajoutez des arrets optionnels et ajustez leur prix.',
+          subtitle: 'Suggestions automatiques sur le trajet + ajout manuel.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              AddressAutocompleteField(
-                controller: _manualStopAddressController,
-                apiKey: _googleMapsApiKey,
-                labelText: 'Adresse arret',
-                hintText: 'Ex: Gare, rond-point, commune',
-                focusNode: _manualStopFocusNode,
-                onChanged: (value) {
-                  setState(() {
-                    _manualStopPoint = _RoutePoint(address: value);
-                  });
-                },
-                onPlaceResolved: (PlaceDetailsResult place) {
-                  setState(() {
-                    _manualStopPoint = _RoutePoint(
-                      address: place.address,
-                      lat: place.lat,
-                      lng: place.lng,
-                    );
-                  });
-                },
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _selectTime(manualStop: true),
-                      icon: const Icon(Icons.access_time_outlined),
-                      label: Text(
-                        _manualStopTime == null ? 'Heure estimee' : _formatTime(_manualStopTime),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _manualStopPriceController,
-                      keyboardType: TextInputType.number,
-                      decoration: _clearableDecoration(
-                        labelText: 'Prix ($_currency)',
-                        controller: _manualStopPriceController,
-                        onCleared: () {
-                          setState(() {
-                            _manualStopPriceController.clear();
-                          });
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
+              Container(
                 width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _addManualStop,
-                  child: const Text('Ajouter cet arret'),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF4FBF7),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFD6EEE1)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Trajet: ${_departureController.text.trim().isEmpty ? '-' : _departureController.text.trim()} -> ${_arrivalController.text.trim().isEmpty ? '-' : _arrivalController.text.trim()}',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF14532D),
+                      ),
+                    ),
+                    if (_routeTrafficNote != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        _routeTrafficNote!,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF166534)),
+                      ),
+                    ],
+                    if (_routeStopsError != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        _routeStopsError!,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFFB45309)),
+                      ),
+                    ],
+                  ],
                 ),
               ),
+              const SizedBox(height: 10),
+              if (_isLoadingRouteStops)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFBFDBFE)),
+                  ),
+                  child: const Text(
+                    'Calcul des arrets suggeres...',
+                    style: TextStyle(fontSize: 12.5, color: Color(0xFF1D4ED8)),
+                  ),
+                ),
+              if (_isLoadingRouteStops) const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: _isLoadingRouteStops ? null : _refreshRouteStopSuggestions,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Rafraichir suggestions'),
+                ),
+              ),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Text(
+                  _isLoadingRouteStops
+                      ? 'Diagnostic suggestions: calcul en cours...'
+                      : _routeStopsError != null
+                          ? 'Diagnostic suggestions: $_routeStopsError'
+                          : _routeStopsCount > 0
+                              ? 'Diagnostic suggestions: $_routeStopsCount proposition(s) automatique(s) trouvee(s).'
+                              : _hasAttemptedRouteSuggestions
+                                  ? 'Diagnostic suggestions: 0 proposition automatique pour ce trajet.'
+                                  : 'Diagnostic suggestions: cliquez sur "Rafraichir suggestions".',
+                  style: const TextStyle(fontSize: 12.5),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _showManualStopForm = !_showManualStopForm;
+                    });
+                    if (_showManualStopForm) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (!mounted) return;
+                        _manualStopFocusNode.requestFocus();
+                      });
+                    }
+                  },
+                  child: Text(
+                    _showManualStopForm
+                        ? 'Masquer le formulaire'
+                        : 'Ajouter un trajet intermediaire',
+                  ),
+                ),
+              ),
+              if (_showManualStopForm) ...[
+                AddressAutocompleteField(
+                  controller: _manualStopAddressController,
+                  apiKey: _googleMapsApiKey,
+                  labelText: 'Adresse arret',
+                  hintText: 'Ex: Gare, rond-point, commune',
+                  focusNode: _manualStopFocusNode,
+                  onChanged: (value) {
+                    setState(() {
+                      _manualStopPoint = _RoutePoint(address: value);
+                    });
+                  },
+                  onPlaceResolved: (PlaceDetailsResult place) {
+                    setState(() {
+                      _manualStopPoint = _RoutePoint(
+                        address: place.address,
+                        lat: place.lat,
+                        lng: place.lng,
+                      );
+                    });
+                  },
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _selectTime(manualStop: true),
+                        icon: const Icon(Icons.access_time_outlined),
+                        label: Text(
+                          _manualStopTime == null ? 'Heure estimee' : _formatTime(_manualStopTime),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _manualStopPriceController,
+                        keyboardType: TextInputType.number,
+                        decoration: _clearableDecoration(
+                          labelText: 'Prix ($_currency)',
+                          controller: _manualStopPriceController,
+                          onCleared: () {
+                            setState(() {
+                              _manualStopPriceController.clear();
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _addManualStop,
+                    child: const Text('Ajouter cet arret'),
+                  ),
+                ),
+              ],
               const SizedBox(height: 14),
               if (_intermediateStops.isEmpty)
                 const _InlineInfo(text: 'Aucun arret ajoute pour le moment.')
               else
                 ..._intermediateStops.map(
-                  (stop) => Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      title: Text(stop.address),
-                      subtitle: Text(
-                        '${stop.estimatedTime} - ${stop.priceFromDeparture.toStringAsFixed(0)} $_currency (${stop.source})',
+                  (stop) => Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      gradient: const LinearGradient(
+                        colors: <Color>[Color(0xFFFFFFFF), Color(0xFFF8FCFA)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
-                      leading: Checkbox(
-                        value: stop.selected,
-                        onChanged: (_) => _toggleStopSelection(stop.id),
-                      ),
-                      trailing: IconButton(
-                        onPressed: () => _removeStop(stop.id),
-                        icon: const Icon(Icons.delete_outline),
+                      border: Border.all(color: const Color(0xFFD6EEE1)),
+                      boxShadow: <BoxShadow>[
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.04),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Theme(
+                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                      child: ExpansionTile(
+                        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        leading: Transform.scale(
+                          scale: 1.06,
+                          child: Checkbox(
+                            value: stop.selected,
+                            activeColor: const Color(0xFF0A7B4F),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            onChanged: (_) => _toggleStopSelection(stop.id),
+                          ),
+                        ),
+                        title: Text(
+                          stop.address,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.4),
+                        ),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: stop.source == 'route'
+                                      ? const Color(0xFFE9F7EF)
+                                      : const Color(0xFFF3F4F6),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  stop.source == 'route' ? 'Sugg\u00e9r\u00e9' : 'Manuel',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: stop.source == 'route'
+                                        ? const Color(0xFF166534)
+                                        : const Color(0xFF475569),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    side: const BorderSide(color: Color(0xFFCFE6DA)),
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                  ),
+                                  onPressed: () => _selectStopTime(stop.id),
+                                  icon: const Icon(Icons.access_time_outlined),
+                                  label: Text('Heure: ${stop.estimatedTime}'),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF7FAF8),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFFDDEBE3)),
+                            ),
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  tooltip: _currency.toUpperCase() == 'EUR' ? '-1' : '-500',
+                                  onPressed: () => _adjustStopPrice(stop.id, increment: false),
+                                  icon: const Icon(Icons.remove_circle_outline_rounded),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    '${stop.priceFromDeparture.toStringAsFixed(0)} $_currency',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: _currency.toUpperCase() == 'EUR' ? '+1' : '+500',
+                                  onPressed: () => _adjustStopPrice(stop.id, increment: true),
+                                  icon: const Icon(Icons.add_circle_outline_rounded),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -1057,31 +1643,6 @@ class _AddTripPageState extends State<AddTripPage> {
     }
   }
 
-  String _stepIllustrationAsset(_TripStep step) {
-    switch (step) {
-      case _TripStep.departure:
-        return 'assets/illustrations/departure.svg';
-      case _TripStep.arrival:
-        return 'assets/illustrations/arrival.svg';
-      case _TripStep.seats:
-      case _TripStep.price:
-        return 'assets/illustrations/seats_price.svg';
-      case _TripStep.date:
-      case _TripStep.time:
-        return 'assets/illustrations/schedule.svg';
-      case _TripStep.stops:
-        return 'assets/illustrations/stops.svg';
-      case _TripStep.driver:
-        return 'assets/illustrations/driver.svg';
-      case _TripStep.vehicle:
-        return 'assets/illustrations/vehicle.svg';
-      case _TripStep.comfort:
-        return 'assets/illustrations/comfort.svg';
-      case _TripStep.review:
-        return 'assets/illustrations/review.svg';
-    }
-  }
-
   Widget _buildRouteMapCard() {
     final bool hasAnyPoint = _departureLatLng != null || _arrivalLatLng != null;
 
@@ -1101,18 +1662,26 @@ class _AddTripPageState extends State<AddTripPage> {
       clipBehavior: Clip.antiAlias,
       child: hasAnyPoint
           ? SizedBox(
-              height: 196,
+              height: 280,
               child: GoogleMap(
-                initialCameraPosition: CameraPosition(target: _mapCenter, zoom: 11.4),
+                initialCameraPosition: CameraPosition(target: _mapCenter, zoom: 13.8),
+                onMapCreated: (GoogleMapController controller) {
+                  _mapController = controller;
+                  _scheduleMapFit();
+                },
                 markers: _mapMarkers,
                 polylines: _mapPolylines,
-                zoomControlsEnabled: false,
+                zoomControlsEnabled: true,
+                zoomGesturesEnabled: true,
+                scrollGesturesEnabled: true,
+                rotateGesturesEnabled: true,
+                tiltGesturesEnabled: true,
                 myLocationButtonEnabled: false,
                 mapToolbarEnabled: false,
               ),
             )
           : Container(
-              height: 150,
+              height: 200,
               color: const Color(0xFFEAF8F0),
               padding: const EdgeInsets.all(16),
               child: Row(
@@ -1179,22 +1748,18 @@ class _AddTripPageState extends State<AddTripPage> {
                       duration: const Duration(milliseconds: 280),
                       child: KeyedSubtree(
                         key: ValueKey<String>(
-                          '${_departurePoint.lat ?? 0}-${_departurePoint.lng ?? 0}-${_arrivalPoint.lat ?? 0}-${_arrivalPoint.lng ?? 0}',
+                          '${_departurePoint.lat ?? 0}-${_departurePoint.lng ?? 0}-${_arrivalPoint.lat ?? 0}-${_arrivalPoint.lng ?? 0}-${_routePolylinePoints.length}',
                         ),
                         child: _buildRouteMapCard(),
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      child: _StepIllustration(
-                        key: ValueKey<_TripStep>(_steps[_stepIndex]),
-                        assetPath: _stepIllustrationAsset(_steps[_stepIndex]),
-                      ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Trace: ${_mapPolylines.isNotEmpty ? 'OK' : 'Aucun'} | points route: ${_routePolylinePoints.length}',
+                      style: const TextStyle(fontSize: 11.5, color: Color(0xFF475569)),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
+                    const SizedBox(height: 8),
                     if (_submittedTrip != null) ...[
                       const SizedBox(height: 14),
                       Card(
@@ -1368,39 +1933,6 @@ class _InlineInfo extends StatelessWidget {
   }
 }
 
-class _StepIllustration extends StatelessWidget {
-  const _StepIllustration({
-    required this.assetPath,
-    super.key,
-  });
-
-  final String assetPath;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFDCF5E6)),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: SvgPicture.asset(
-        assetPath,
-        fit: BoxFit.cover,
-        height: 160,
-      ),
-    );
-  }
-}
-
 class _SeatsInputCard extends StatelessWidget {
   const _SeatsInputCard({
     required this.seatsController,
@@ -1535,3 +2067,4 @@ class _SeatActionButton extends StatelessWidget {
     );
   }
 }
+
