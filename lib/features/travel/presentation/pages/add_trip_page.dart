@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:govipservices/features/travel/data/google_places_service.dart';
 import 'package:govipservices/features/travel/data/route_stop_suggestion_service.dart';
+import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
 
 enum _TripStep {
@@ -16,7 +17,10 @@ enum _TripStep {
   time,
   stops,
   driver,
-  vehicle,
+  contact,
+  vehicleInfo,
+  proCarrier,
+  frequency,
   comfort,
   review,
 }
@@ -103,6 +107,7 @@ class _AddTripPageState extends State<AddTripPage> {
   static const LatLng _defaultMapCenter = LatLng(5.3600, -4.0083);
   static const RouteStopSuggestionService _routeSuggestionService = RouteStopSuggestionService();
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TravelRepository _travelRepository = TravelRepository();
   GoogleMapController? _mapController;
 
   static const List<_TripStep> _steps = [
@@ -114,7 +119,10 @@ class _AddTripPageState extends State<AddTripPage> {
     _TripStep.time,
     _TripStep.stops,
     _TripStep.driver,
-    _TripStep.vehicle,
+    _TripStep.contact,
+    _TripStep.vehicleInfo,
+    _TripStep.proCarrier,
+    _TripStep.frequency,
     _TripStep.comfort,
     _TripStep.review,
   ];
@@ -126,16 +134,17 @@ class _AddTripPageState extends State<AddTripPage> {
   final TextEditingController _driverController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _vehicleController = TextEditingController();
+  final TextEditingController _maxWeightController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
   final TextEditingController _manualStopAddressController = TextEditingController();
   final TextEditingController _manualStopPriceController = TextEditingController(text: '0');
   final FocusNode _departureFocusNode = FocusNode();
   final FocusNode _arrivalFocusNode = FocusNode();
   final FocusNode _seatsFocusNode = FocusNode();
-  final FocusNode _priceFocusNode = FocusNode();
   final FocusNode _manualStopFocusNode = FocusNode();
   final FocusNode _driverFocusNode = FocusNode();
   final FocusNode _phoneFocusNode = FocusNode();
+  final FocusNode _vehicleFocusNode = FocusNode();
   final FocusNode _notesFocusNode = FocusNode();
 
   DateTime? _departureDate;
@@ -188,6 +197,20 @@ class _AddTripPageState extends State<AddTripPage> {
       _departureTime!.hour,
       _departureTime!.minute,
     );
+  }
+
+  bool get _isDepartureInPast {
+    final DateTime? selected = _departureDateTime;
+    if (selected == null) return false;
+    return selected.isBefore(DateTime.now());
+  }
+
+  bool get _isDepartureDateInPast {
+    if (_departureDate == null) return false;
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
+    final DateTime selected = DateTime(_departureDate!.year, _departureDate!.month, _departureDate!.day);
+    return selected.isBefore(today);
   }
 
   @override
@@ -338,16 +361,17 @@ class _AddTripPageState extends State<AddTripPage> {
     _driverController.dispose();
     _phoneController.dispose();
     _vehicleController.dispose();
+    _maxWeightController.dispose();
     _notesController.dispose();
     _manualStopAddressController.dispose();
     _manualStopPriceController.dispose();
     _departureFocusNode.dispose();
     _arrivalFocusNode.dispose();
     _seatsFocusNode.dispose();
-    _priceFocusNode.dispose();
     _manualStopFocusNode.dispose();
     _driverFocusNode.dispose();
     _phoneFocusNode.dispose();
+    _vehicleFocusNode.dispose();
     _notesFocusNode.dispose();
     super.dispose();
   }
@@ -362,32 +386,83 @@ class _AddTripPageState extends State<AddTripPage> {
         final int? seats = int.tryParse(_seatsController.text.trim());
         return seats != null && seats > 0;
       case _TripStep.price:
-        final double? price = double.tryParse(_priceController.text.trim());
+        final String rawPrice = _priceController.text.trim().replaceAll(',', '.');
+        final double? price = double.tryParse(rawPrice);
         return price != null && price >= 0;
       case _TripStep.date:
-        return _departureDate != null;
+        return _departureDate != null && !_isDepartureDateInPast;
       case _TripStep.time:
-        return _departureTime != null;
+        return _departureTime != null && !_isDepartureInPast;
       case _TripStep.stops:
       case _TripStep.review:
         return true;
       case _TripStep.driver:
         return _driverController.text.trim().length >= 2;
-      case _TripStep.vehicle:
-        return _phoneController.text.trim().length >= 6 && _vehicleController.text.trim().length >= 2;
+      case _TripStep.contact:
+        return _phoneController.text.trim().length >= 6;
+      case _TripStep.vehicleInfo:
+        return _vehicleController.text.trim().length >= 2;
+      case _TripStep.proCarrier:
+      case _TripStep.frequency:
+        return true;
       case _TripStep.comfort:
-        return _notesController.text.trim().length <= 500;
+        final String rawWeight = _maxWeightController.text.trim().replaceAll(',', '.');
+        final double? weight = rawWeight.isEmpty ? null : double.tryParse(rawWeight);
+        final bool validWeight = rawWeight.isEmpty || (weight != null && weight >= 0);
+        return validWeight && _notesController.text.trim().length <= 500;
     }
   }
 
   void _goNext() {
     if (!_validateCurrentStep()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Veuillez completer les informations requises pour continuer.')),
+      String message = 'Veuillez completer les informations requises pour continuer.';
+      if (_steps[_stepIndex] == _TripStep.date) {
+        message = 'La date de depart ne peut pas etre dans le passe.';
+      } else if (_steps[_stepIndex] == _TripStep.time) {
+        message = 'L heure de depart doit etre dans le futur.';
+      }
+      _showToast(
+        message,
+        backgroundColor: const Color(0xFFB45309),
+        icon: Icons.warning_amber_rounded,
       );
       return;
     }
     _setStepIndex((_stepIndex + 1).clamp(0, _steps.length - 1), isForward: true);
+  }
+
+  void _dismissKeyboard() {
+    FocusScope.of(context).unfocus();
+  }
+
+  void _showToast(
+    String message, {
+    Color backgroundColor = const Color(0xFF0F172A),
+    IconData icon = Icons.info_outline_rounded,
+  }) {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        backgroundColor: backgroundColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        duration: const Duration(seconds: 3),
+        content: Row(
+          children: [
+            Icon(icon, color: Colors.white, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _goBack() {
@@ -431,7 +506,7 @@ class _AddTripPageState extends State<AddTripPage> {
       case _TripStep.seats:
         return null;
       case _TripStep.price:
-        return _priceFocusNode;
+        return null;
       case _TripStep.date:
       case _TripStep.time:
       case _TripStep.review:
@@ -440,29 +515,22 @@ class _AddTripPageState extends State<AddTripPage> {
         return null;
       case _TripStep.driver:
         return _driverFocusNode;
-      case _TripStep.vehicle:
+      case _TripStep.contact:
         return _phoneFocusNode;
+      case _TripStep.vehicleInfo:
+        return _vehicleFocusNode;
+      case _TripStep.proCarrier:
+      case _TripStep.frequency:
+        return null;
       case _TripStep.comfort:
-        return _notesFocusNode;
+        return null;
     }
   }
 
   void _requestStepFocus() {
-    if (_steps[_stepIndex] == _TripStep.price) {
-      _clearDefaultPriceIfNeeded();
-    }
     final FocusNode? node = _focusNodeForStep(_steps[_stepIndex]);
     if (node == null || !mounted) return;
     FocusScope.of(context).requestFocus(node);
-  }
-
-  void _clearDefaultPriceIfNeeded() {
-    final String raw = _priceController.text.trim();
-    final double? parsed = double.tryParse(raw);
-    if (parsed == null || parsed != 0) return;
-    setState(() {
-      _priceController.clear();
-    });
   }
 
   void _decrementSeats() {
@@ -479,6 +547,31 @@ class _AddTripPageState extends State<AddTripPage> {
       _seatsController.text = next.toString();
       _seatsController.selection = TextSelection.collapsed(offset: _seatsController.text.length);
     });
+  }
+
+  double get _priceAmount {
+    final String raw = _priceController.text.trim().replaceAll(',', '.');
+    return double.tryParse(raw) ?? 0;
+  }
+
+  int get _priceStep => _currency.toUpperCase() == 'EUR' ? 1 : 1000;
+
+  void _setPriceAmount(double value) {
+    final double safe = value < 0 ? 0 : value;
+    setState(() {
+      _priceController.text = safe.toStringAsFixed(0);
+      _priceController.selection = TextSelection.collapsed(offset: _priceController.text.length);
+    });
+    _refreshRouteStopSuggestions();
+  }
+
+  void _decrementPrice() => _setPriceAmount(_priceAmount - _priceStep);
+
+  void _incrementPrice() => _setPriceAmount(_priceAmount + _priceStep);
+
+  void _onManualPriceChanged(String value) {
+    setState(() {});
+    _refreshRouteStopSuggestions();
   }
 
   InputDecoration _clearableDecoration({
@@ -703,8 +796,10 @@ class _AddTripPageState extends State<AddTripPage> {
       final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Activez la localisation pour utiliser votre position actuelle.')),
+        _showToast(
+          'Activez la localisation pour utiliser votre position actuelle.',
+          backgroundColor: const Color(0xFFB45309),
+          icon: Icons.location_off_outlined,
         );
         return;
       }
@@ -715,8 +810,10 @@ class _AddTripPageState extends State<AddTripPage> {
       }
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Permission de localisation refusee.')),
+        _showToast(
+          'Permission de localisation refusee.',
+          backgroundColor: const Color(0xFFB45309),
+          icon: Icons.lock_outline_rounded,
         );
         return;
       }
@@ -762,8 +859,10 @@ class _AddTripPageState extends State<AddTripPage> {
       _autoAdvanceFromDeparture();
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Impossible de recuperer votre position actuelle.')),
+      _showToast(
+        'Impossible de recuperer votre position actuelle.',
+        backgroundColor: const Color(0xFF991B1B),
+        icon: Icons.error_outline_rounded,
       );
     } finally {
       if (!mounted) return;
@@ -775,18 +874,38 @@ class _AddTripPageState extends State<AddTripPage> {
 
   Future<void> _selectDate() async {
     final DateTime now = DateTime.now();
-    final DateTime initialDate = _departureDate ?? now;
+    final DateTime today = DateTime(now.year, now.month, now.day);
+    final DateTime initialDate = _departureDate ?? today;
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: initialDate,
-      firstDate: now,
+      firstDate: today,
       lastDate: DateTime(now.year + 2),
       locale: const Locale('fr', 'FR'),
     );
     if (picked == null) return;
     setState(() {
       _departureDate = picked;
+      if (_departureTime != null) {
+        final DateTime candidate = DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+          _departureTime!.hour,
+          _departureTime!.minute,
+        );
+        if (candidate.isBefore(DateTime.now())) {
+          _departureTime = null;
+        }
+      }
     });
+    if (_departureTime == null && picked.isAtSameMomentAs(today)) {
+      _showToast(
+        'Choisissez une heure future pour aujourd\'hui.',
+        backgroundColor: const Color(0xFFB45309),
+        icon: Icons.schedule_rounded,
+      );
+    }
     _refreshRouteStopSuggestions();
     if (_stepIndex == _steps.indexOf(_TripStep.date)) {
       _setStepIndex(_steps.indexOf(_TripStep.time), isForward: true);
@@ -810,6 +929,23 @@ class _AddTripPageState extends State<AddTripPage> {
       },
     );
     if (picked == null) return;
+    if (!manualStop && _departureDate != null) {
+      final DateTime candidate = DateTime(
+        _departureDate!.year,
+        _departureDate!.month,
+        _departureDate!.day,
+        picked.hour,
+        picked.minute,
+      );
+      if (candidate.isBefore(DateTime.now())) {
+        _showToast(
+          'Heure invalide: selectionnez une heure future.',
+          backgroundColor: const Color(0xFFB45309),
+          icon: Icons.schedule_rounded,
+        );
+        return;
+      }
+    }
     setState(() {
       if (manualStop) {
         _manualStopTime = picked;
@@ -837,6 +973,67 @@ class _AddTripPageState extends State<AddTripPage> {
     final String hour = value.hour.toString().padLeft(2, '0');
     final String minute = value.minute.toString().padLeft(2, '0');
     return '$hour:$minute';
+  }
+
+  String _formatApiDate(DateTime? value) {
+    if (value == null) return '';
+    final String month = value.month.toString().padLeft(2, '0');
+    final String day = value.day.toString().padLeft(2, '0');
+    return '${value.year}-$month-$day';
+  }
+
+  String? _formatDurationMinutes(int? minutes) {
+    if (minutes == null || minutes <= 0) return null;
+    final int h = minutes ~/ 60;
+    final int m = minutes % 60;
+    return '${h}h${m.toString().padLeft(2, '0')}';
+  }
+
+  List<Map<String, dynamic>> _selectedStopsPayload() {
+    return _intermediateStops
+        .where((stop) => stop.selected)
+        .map(
+          (stop) => <String, dynamic>{
+            'id': stop.id,
+            'address': stop.address,
+            'estimatedTime': stop.estimatedTime,
+            'priceFromDeparture': stop.priceFromDeparture,
+            'lat': stop.lat,
+            'lng': stop.lng,
+            'source': stop.source,
+          },
+        )
+        .toList(growable: false);
+  }
+
+  Map<String, dynamic> _buildTripPayload() {
+    return <String, dynamic>{
+      'departurePlace': _departureController.text.trim(),
+      'arrivalPlace': _arrivalController.text.trim(),
+      'arrivalEstimatedTime': _formatDurationMinutes(_routeTotalMinutes),
+      'currency': _currency,
+      'vehiclePhotoUrl': null,
+      'intermediateStops': _selectedStopsPayload(),
+      'departureDate': _formatApiDate(_departureDate),
+      'departureTime': _formatTime(_departureTime),
+      'seats': int.tryParse(_seatsController.text.trim()) ?? 1,
+      'pricePerSeat': _priceAmount,
+      'vehicleModel': _vehicleController.text.trim(),
+      'isBus': _isBus,
+      'isFrequentTrip': _tripFrequency != 'none',
+      'tripFrequency': _tripFrequency,
+      'driverName': _driverController.text.trim(),
+      'contactPhone': _phoneController.text.trim(),
+      'hasLuggageSpace': _hasLuggageSpace,
+      'allowsPets': _allowsPets,
+      'notes': _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+      'maxWeightKg': _maxWeightController.text.trim().isEmpty
+          ? null
+          : double.tryParse(_maxWeightController.text.trim().replaceAll(',', '.')),
+      'ownerUid': null,
+      'ownerEmail': null,
+      'status': 'published',
+    };
   }
 
   void _updateDepartureAddressText(String value) {
@@ -868,8 +1065,10 @@ class _AddTripPageState extends State<AddTripPage> {
   void _addManualStop() {
     final String address = _manualStopAddressController.text.trim();
     if (address.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Veuillez saisir une adresse darret.')),
+      _showToast(
+        'Veuillez saisir une adresse d\'arret.',
+        backgroundColor: const Color(0xFFB45309),
+        icon: Icons.edit_location_alt_outlined,
       );
       return;
     }
@@ -966,33 +1165,49 @@ class _AddTripPageState extends State<AddTripPage> {
 
   Future<void> _publishTrip() async {
     if (!_validateCurrentStep()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Certains champs sont invalides.')),
+      _showToast(
+        'Certains champs sont invalides.',
+        backgroundColor: const Color(0xFFB45309),
+        icon: Icons.warning_amber_rounded,
       );
       return;
     }
     setState(() {
       _isPublishing = true;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 900));
-    if (!mounted) return;
+    try {
+      final Map<String, dynamic> payload = _buildTripPayload();
+      final published = await _travelRepository.addTrip(payload);
+      if (!mounted) return;
 
-    final int selectedStopsCount = _intermediateStops.where((stop) => stop.selected).length;
-    final String id = DateTime.now().millisecondsSinceEpoch.toString();
-    final String trackNum = 'TR-${id.substring(id.length - 6)}';
-
-    setState(() {
-      _submittedTrip = _PublishedTrip(
-        id: id,
-        trackNum: trackNum,
-        title: _tripTitle,
-        selectedStopsCount: selectedStopsCount,
+      final int selectedStopsCount = _intermediateStops.where((stop) => stop.selected).length;
+      setState(() {
+        _submittedTrip = _PublishedTrip(
+          id: published.id,
+          trackNum: published.trackNum,
+          title: _tripTitle,
+          selectedStopsCount: selectedStopsCount,
+        );
+        _isPublishing = false;
+      });
+      _showToast(
+        published.wasCreated
+            ? 'Trajet publie avec succes.'
+            : 'Ce trajet existe deja.',
+        backgroundColor: const Color(0xFF166534),
+        icon: published.wasCreated ? Icons.check_circle_rounded : Icons.info_outline_rounded,
       );
-      _isPublishing = false;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Trajet publie avec succes.')),
-    );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isPublishing = false;
+      });
+      _showToast(
+        'Echec de publication: $error',
+        backgroundColor: const Color(0xFF991B1B),
+        icon: Icons.error_outline_rounded,
+      );
+    }
   }
 
   Widget _buildStepContent() {
@@ -1105,22 +1320,86 @@ class _AddTripPageState extends State<AddTripPage> {
                 },
               ),
               const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  children: [
+                    _PriceAdjustButton(
+                      tooltip: _currency.toUpperCase() == 'EUR' ? '-1' : '-1000',
+                      onTap: _decrementPrice,
+                      icon: Icons.remove_rounded,
+                      backgroundColor: const Color(0xFFFEE2E2),
+                      iconColor: const Color(0xFFB91C1C),
+                    ),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Text(
+                            '${_priceAmount.toStringAsFixed(0)} $_currency',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 23,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _currency.toUpperCase() == 'EUR' ? 'Variation: +/-1' : 'Variation: +/-1000',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _PriceAdjustButton(
+                      tooltip: _currency.toUpperCase() == 'EUR' ? '+1' : '+1000',
+                      onTap: _incrementPrice,
+                      icon: Icons.add_rounded,
+                      backgroundColor: const Color(0xFFDCFCE7),
+                      iconColor: const Color(0xFF166534),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
               TextFormField(
                 controller: _priceController,
-                focusNode: _priceFocusNode,
-                keyboardType: TextInputType.number,
-                onTap: _clearDefaultPriceIfNeeded,
-                onChanged: (_) => _refreshRouteStopSuggestions(),
+                keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                textInputAction: TextInputAction.done,
+                onChanged: _onManualPriceChanged,
+                onFieldSubmitted: (_) => FocusScope.of(context).unfocus(),
                 decoration: _clearableDecoration(
-                  labelText: 'Prix par place ($_currency)',
+                  labelText: 'Saisie manuelle du prix ($_currency)',
+                  hintText: _currency.toUpperCase() == 'EUR' ? 'Ex: 12' : 'Ex: 2500',
                   controller: _priceController,
                   onCleared: () {
                     setState(() {
                       _priceController.clear();
                     });
-                    _priceFocusNode.requestFocus();
                     _refreshRouteStopSuggestions();
                   },
+                ).copyWith(
+                  prefixIcon: const Icon(Icons.edit_outlined),
+                  filled: true,
+                  fillColor: Colors.white,
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFF0EA5E9), width: 1.5),
+                  ),
                 ),
               ),
             ],
@@ -1319,6 +1598,8 @@ class _AddTripPageState extends State<AddTripPage> {
                       child: TextFormField(
                         controller: _manualStopPriceController,
                         keyboardType: TextInputType.number,
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) => _dismissKeyboard(),
                         decoration: _clearableDecoration(
                           labelText: 'Prix ($_currency)',
                           controller: _manualStopPriceController,
@@ -1472,31 +1753,107 @@ class _AddTripPageState extends State<AddTripPage> {
         return _TripFieldSection(
           title: 'Infos conducteur',
           subtitle: 'Nom affiche pour les voyageurs.',
-          child: TextFormField(
-            controller: _driverController,
-            focusNode: _driverFocusNode,
-            decoration: _clearableDecoration(
-              labelText: 'Nom du conducteur',
-              hintText: 'Ex: Koffi',
-              controller: _driverController,
-              onCleared: () {
-                setState(() {
-                  _driverController.clear();
-                });
-                _driverFocusNode.requestFocus();
-              },
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  children: const [
+                    Icon(Icons.person_outline_rounded, size: 18, color: Color(0xFF0F172A)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Le nom sera visible par les voyageurs.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF475569),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _driverController,
+                focusNode: _driverFocusNode,
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) => _dismissKeyboard(),
+                decoration: _clearableDecoration(
+                  labelText: 'Nom du conducteur',
+                  hintText: 'Ex: Koffi',
+                  controller: _driverController,
+                  onCleared: () {
+                    setState(() {
+                      _driverController.clear();
+                    });
+                    _driverFocusNode.requestFocus();
+                  },
+                ).copyWith(
+                  prefixIcon: const Icon(Icons.badge_outlined),
+                  filled: true,
+                  fillColor: const Color(0xFFFDFEFE),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFF0EA5E9), width: 1.6),
+                  ),
+                ),
+              ),
+            ],
           ),
         );
-      case _TripStep.vehicle:
+      case _TripStep.contact:
         return _TripFieldSection(
-          title: 'Contact et vehicule',
-          subtitle: 'Precisez votre numero et le vehicule utilise.',
+          title: 'Contact conducteur',
+          subtitle: 'Ajoutez votre numero pour etre joignable.',
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  children: const [
+                    Icon(Icons.call_outlined, size: 18, color: Color(0xFF0F172A)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Le numero sert aux confirmations et urgences.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF475569),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
               TextFormField(
                 controller: _phoneController,
                 focusNode: _phoneFocusNode,
+                keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) => _dismissKeyboard(),
                 decoration: _clearableDecoration(
                   labelText: 'Telephone',
                   hintText: '+225 07 00 00 00 00',
@@ -1507,23 +1864,96 @@ class _AddTripPageState extends State<AddTripPage> {
                     });
                     _phoneFocusNode.requestFocus();
                   },
+                ).copyWith(
+                  prefixIcon: const Icon(Icons.phone_android_outlined),
+                  filled: true,
+                  fillColor: const Color(0xFFFDFEFE),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFF0EA5E9), width: 1.6),
+                  ),
                 ),
               ),
-              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      case _TripStep.vehicleInfo:
+        return _TripFieldSection(
+          title: 'Infos vehicule',
+          subtitle: 'Renseignez marque, modele et couleur dans un seul champ.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  children: const [
+                    Icon(Icons.directions_car_filled_rounded, size: 18, color: Color(0xFF0F172A)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Exemple: Toyota Corolla - Gris',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF475569),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
               TextFormField(
                 controller: _vehicleController,
+                focusNode: _vehicleFocusNode,
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) => _dismissKeyboard(),
                 decoration: _clearableDecoration(
                   labelText: 'Vehicule',
-                  hintText: 'Toyota Corolla - Gris',
+                  hintText: 'Marque - Modele - Couleur',
                   controller: _vehicleController,
                   onCleared: () {
                     setState(() {
                       _vehicleController.clear();
                     });
+                    _vehicleFocusNode.requestFocus();
                   },
+                ).copyWith(
+                  prefixIcon: const Icon(Icons.badge_outlined),
+                  filled: true,
+                  fillColor: const Color(0xFFFDFEFE),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFF0EA5E9), width: 1.6),
+                  ),
                 ),
               ),
-              const SizedBox(height: 12),
+            ],
+          ),
+        );
+      case _TripStep.proCarrier:
+        return _TripFieldSection(
+          title: 'Transporteur pro',
+          subtitle: 'Optionnel: cochez si vous etes professionnel.',
+          child: Column(
+            children: [
               CheckboxListTile(
                 value: _isBus,
                 onChanged: (value) {
@@ -1532,25 +1962,73 @@ class _AddTripPageState extends State<AddTripPage> {
                   });
                 },
                 title: const Text('Transporteur pro'),
-                subtitle: const Text('Activez pour un service professionnel.'),
+                subtitle: const Text('Vous pouvez continuer sans cocher.'),
                 contentPadding: EdgeInsets.zero,
               ),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<String>(
-                value: _tripFrequency,
-                decoration: const InputDecoration(labelText: 'Frequence'),
-                items: const [
-                  DropdownMenuItem(value: 'none', child: Text('Ponctuel')),
-                  DropdownMenuItem(value: 'daily', child: Text('Quotidien')),
-                  DropdownMenuItem(value: 'weekly', child: Text('Hebdomadaire')),
-                  DropdownMenuItem(value: 'monthly', child: Text('Mensuel')),
-                ],
-                onChanged: (value) {
-                  if (value == null) return;
-                  setState(() {
-                    _tripFrequency = value;
-                  });
-                },
+            ],
+          ),
+        );
+      case _TripStep.frequency:
+        const List<({String value, String label})> frequencyOptions = [
+          (value: 'none', label: 'Ponctuel'),
+          (value: 'daily', label: 'Quotidien'),
+          (value: 'weekly', label: 'Hebdo'),
+          (value: 'monthly', label: 'Mensuel'),
+        ];
+        return _TripFieldSection(
+          title: 'Frequence',
+          subtitle: 'Ponctuel est selectionne par defaut.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    alignment: WrapAlignment.center,
+                    runAlignment: WrapAlignment.center,
+                    children: frequencyOptions.map((option) {
+                      final bool isSelected = _tripFrequency == option.value;
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () {
+                          setState(() {
+                            _tripFrequency = option.value;
+                          });
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: isSelected ? const Color(0xFFDCFCE7) : const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected ? const Color(0xFF86EFAC) : const Color(0xFFE2E8F0),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (isSelected) ...[
+                                const Icon(Icons.check_circle_rounded, size: 16, color: Color(0xFF166534)),
+                                const SizedBox(width: 6),
+                              ],
+                              Text(
+                                option.label,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: isSelected ? const Color(0xFF166534) : const Color(0xFF334155),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
               ),
             ],
           ),
@@ -1561,6 +2039,23 @@ class _AddTripPageState extends State<AddTripPage> {
           subtitle: 'Definissez les preferences de voyage.',
           child: Column(
             children: [
+              TextFormField(
+                controller: _maxWeightController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) => FocusScope.of(context).unfocus(),
+                decoration: _clearableDecoration(
+                  labelText: 'Poids max (kg)',
+                  hintText: 'Ex: 20',
+                  controller: _maxWeightController,
+                  onCleared: () {
+                    setState(() {
+                      _maxWeightController.clear();
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(height: 10),
               CheckboxListTile(
                 value: _hasLuggageSpace,
                 onChanged: (value) {
@@ -1604,7 +2099,7 @@ class _AddTripPageState extends State<AddTripPage> {
       case _TripStep.review:
         final String frequencyLabel = switch (_tripFrequency) {
           'daily' => 'Quotidien',
-          'weekly' => 'Hebdomadaire',
+          'weekly' => 'Hebdo',
           'monthly' => 'Mensuel',
           _ => 'Ponctuel',
         };
@@ -1630,9 +2125,16 @@ class _AddTripPageState extends State<AddTripPage> {
               ),
               _SummaryRow(
                 label: 'Vehicule',
-                value: '${_vehicleController.text.trim()} - ${_isBus ? 'Transporteur pro' : 'Vehicule leger'}',
+                value:
+                    '${_vehicleController.text.trim()} (${_isBus ? 'Transporteur pro' : 'Vehicule leger'})',
               ),
               _SummaryRow(label: 'Frequence', value: frequencyLabel),
+              _SummaryRow(
+                label: 'Poids max',
+                value: _maxWeightController.text.trim().isEmpty
+                    ? '-'
+                    : '${_maxWeightController.text.trim()} kg',
+              ),
               _SummaryRow(
                 label: 'Arrets selectionnes',
                 value: _intermediateStops.where((stop) => stop.selected).length.toString(),
@@ -1714,16 +2216,19 @@ class _AddTripPageState extends State<AddTripPage> {
       appBar: AppBar(
         title: const Text('Ajouter un trajet'),
       ),
-      body: Form(
-        key: _formKey,
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 110),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+      body: GestureDetector(
+        onTap: _dismissKeyboard,
+        behavior: HitTestBehavior.translucent,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 110),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                     AnimatedSwitcher(
                       duration: const Duration(milliseconds: 320),
                       switchInCurve: Curves.easeOutBack,
@@ -1790,11 +2295,12 @@ class _AddTripPageState extends State<AddTripPage> {
                         ),
                       ),
                     ],
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: SafeArea(
@@ -1908,6 +2414,48 @@ class _SummaryRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PriceAdjustButton extends StatelessWidget {
+  const _PriceAdjustButton({
+    required this.tooltip,
+    required this.onTap,
+    required this.icon,
+    required this.backgroundColor,
+    required this.iconColor,
+  });
+
+  final String tooltip;
+  final VoidCallback onTap;
+  final IconData icon;
+  final Color backgroundColor;
+  final Color iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: iconColor.withOpacity(0.22)),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: onTap,
+            child: SizedBox(
+              width: 42,
+              height: 42,
+              child: Icon(icon, color: iconColor, size: 20),
+            ),
+          ),
+        ),
       ),
     );
   }
