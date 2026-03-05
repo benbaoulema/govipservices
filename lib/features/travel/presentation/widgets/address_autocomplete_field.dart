@@ -32,7 +32,8 @@ class AddressAutocompleteField extends StatefulWidget {
   State<AddressAutocompleteField> createState() => _AddressAutocompleteFieldState();
 }
 
-class _AddressAutocompleteFieldState extends State<AddressAutocompleteField> {
+class _AddressAutocompleteFieldState extends State<AddressAutocompleteField>
+    with WidgetsBindingObserver {
   final FocusNode _internalFocusNode = FocusNode();
   final Random _random = Random();
   late final GooglePlacesAutocompleteService _service;
@@ -60,6 +61,9 @@ class _AddressAutocompleteFieldState extends State<AddressAutocompleteField> {
     _internalFocusNode.dispose();
     super.dispose();
   }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {}
 
   void _onControllerChanged() {
     if (!mounted) return;

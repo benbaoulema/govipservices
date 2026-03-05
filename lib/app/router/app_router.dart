@@ -8,6 +8,11 @@ import 'package:govipservices/features/travel/presentation/pages/add_trip_page.d
 import 'package:govipservices/features/travel/presentation/pages/book_trip_page.dart';
 import 'package:govipservices/features/travel/presentation/pages/messages_page.dart';
 import 'package:govipservices/features/travel/presentation/pages/my_trips_page.dart';
+import 'package:govipservices/features/travel/presentation/navigation/trip_detail_route_factory.dart';
+import 'package:govipservices/features/user/presentation/pages/create_account_page.dart';
+import 'package:govipservices/features/user/presentation/pages/forgot_password_page.dart';
+import 'package:govipservices/features/user/presentation/pages/login_page.dart';
+import 'package:govipservices/features/user/presentation/pages/account_page.dart';
 
 class AppRouter {
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -15,6 +20,26 @@ class AppRouter {
       case AppRoutes.home:
         return MaterialPageRoute<void>(
           builder: (_) => const HomePage(),
+          settings: settings,
+        );
+      case AppRoutes.authLogin:
+        return MaterialPageRoute<void>(
+          builder: (_) => const LoginPage(),
+          settings: settings,
+        );
+      case AppRoutes.authSignup:
+        return MaterialPageRoute<void>(
+          builder: (_) => const CreateAccountPage(),
+          settings: settings,
+        );
+      case AppRoutes.authForgotPassword:
+        return MaterialPageRoute<void>(
+          builder: (_) => const ForgotPasswordPage(),
+          settings: settings,
+        );
+      case AppRoutes.userAccount:
+        return MaterialPageRoute<void>(
+          builder: (_) => const AccountPage(),
           settings: settings,
         );
       case AppRoutes.parcelsShipPackage:
@@ -42,6 +67,8 @@ class AppRouter {
           builder: (_) => const BookTripPage(),
           settings: settings,
         );
+      case AppRoutes.travelTripDetail:
+        return TripDetailRouteFactory.build(settings);
       case AppRoutes.travelMyTrips:
         return MaterialPageRoute<void>(
           builder: (_) => const MyTripsPage(),

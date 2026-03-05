@@ -1,12 +1,20 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/travel/data/google_places_service.dart';
 import 'package:govipservices/features/travel/data/route_stop_suggestion_service.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
+import 'package:govipservices/features/user/data/user_firestore_repository.dart';
 
 enum _TripStep {
   departure,
@@ -16,6 +24,7 @@ enum _TripStep {
   date,
   time,
   stops,
+  authPrompt,
   driver,
   contact,
   vehicleInfo,
@@ -108,6 +117,8 @@ class _AddTripPageState extends State<AddTripPage> {
   static const RouteStopSuggestionService _routeSuggestionService = RouteStopSuggestionService();
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TravelRepository _travelRepository = TravelRepository();
+  final UserFirestoreRepository _userFirestoreRepository = UserFirestoreRepository();
+  final ImagePicker _imagePicker = ImagePicker();
   GoogleMapController? _mapController;
 
   static const List<_TripStep> _steps = [
@@ -118,6 +129,7 @@ class _AddTripPageState extends State<AddTripPage> {
     _TripStep.date,
     _TripStep.time,
     _TripStep.stops,
+    _TripStep.authPrompt,
     _TripStep.driver,
     _TripStep.contact,
     _TripStep.vehicleInfo,
@@ -134,6 +146,7 @@ class _AddTripPageState extends State<AddTripPage> {
   final TextEditingController _driverController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _vehicleController = TextEditingController();
+  final TextEditingController _vehiclePhotoUrlController = TextEditingController();
   final TextEditingController _maxWeightController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
   final TextEditingController _manualStopAddressController = TextEditingController();
@@ -171,6 +184,8 @@ class _AddTripPageState extends State<AddTripPage> {
   int? _routeTotalMinutes;
   List<LatLng> _routePolylinePoints = <LatLng>[];
   _PublishedTrip? _submittedTrip;
+  bool _userHasVehicleStored = false;
+  String? _vehiclePhotoLocalPath;
 
   final List<_IntermediateStop> _intermediateStops = <_IntermediateStop>[];
   int get _routeStopsCount =>
@@ -216,7 +231,166 @@ class _AddTripPageState extends State<AddTripPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _requestStepFocus());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _requestStepFocus();
+      _prefillFromConnectedUser();
+    });
+  }
+
+  Future<void> _prefillFromConnectedUser() async {
+    final User? authUser = FirebaseAuth.instance.currentUser;
+    if (authUser == null) return;
+    try {
+      final DocumentSnapshot<Map<String, dynamic>> snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(authUser.uid)
+          .get();
+      final Map<String, dynamic> data = snapshot.data() ?? <String, dynamic>{};
+
+      final String name = (data['displayName'] as String?)?.trim() ?? (authUser.displayName?.trim() ?? '');
+      final Map<String, dynamic>? phone = data['phone'] is Map<String, dynamic>
+          ? Map<String, dynamic>.from(data['phone'] as Map<String, dynamic>)
+          : null;
+      final String countryCode = (phone?['countryCode'] as String?)?.trim() ?? '';
+      final String number = (phone?['number'] as String?)?.trim() ?? '';
+      final String fullPhone = [countryCode, number].where((part) => part.isNotEmpty).join(' ').trim();
+      final String vehicle = (data['vehicleModel'] as String?)?.trim() ?? '';
+
+      if (!mounted) return;
+      setState(() {
+        if (_driverController.text.trim().isEmpty && name.isNotEmpty) {
+          _driverController.text = name;
+        }
+        if (_phoneController.text.trim().isEmpty && fullPhone.isNotEmpty) {
+          _phoneController.text = fullPhone;
+        }
+        if (_vehicleController.text.trim().isEmpty && vehicle.isNotEmpty) {
+          _vehicleController.text = vehicle;
+        }
+        _userHasVehicleStored = vehicle.isNotEmpty;
+      });
+    } catch (_) {
+      // Ignore prefill failures to keep add-trip flow resilient.
+    }
+  }
+
+  Future<void> _saveVehicleToUserIfMissing() async {
+    final User? authUser = FirebaseAuth.instance.currentUser;
+    final String vehicle = _vehicleController.text.trim();
+    if (authUser == null || vehicle.isEmpty || _userHasVehicleStored) return;
+    try {
+      await _userFirestoreRepository.update(
+        authUser.uid,
+        <String, dynamic>{'vehicleModel': vehicle},
+      );
+      if (!mounted) return;
+      setState(() {
+        _userHasVehicleStored = true;
+      });
+    } catch (_) {
+      // Non-blocking: trip remains published even if user profile update fails.
+    }
+  }
+
+  Future<void> _openAuthAndRefresh(String route) async {
+    await Navigator.of(context).pushNamed(
+      route,
+      arguments: const <String, dynamic>{'returnToCaller': true},
+    );
+    if (!mounted) return;
+    await _prefillFromConnectedUser();
+    setState(() {});
+  }
+
+  void _continueFromAuthPrompt() {
+    _setStepIndex(_steps.indexOf(_TripStep.driver), isForward: true);
+  }
+
+  Future<void> _editVehiclePhotoUrl() async {
+    final int? action = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Choisir depuis la galerie'),
+                onTap: () => Navigator.of(context).pop(1),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: const Text('Prendre une photo'),
+                onTap: () => Navigator.of(context).pop(2),
+              ),
+              if (_vehiclePhotoLocalPath != null || _vehiclePhotoUrlController.text.trim().isNotEmpty)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded),
+                  title: const Text('Retirer la photo'),
+                  onTap: () => Navigator.of(context).pop(3),
+                ),
+              const SizedBox(height: 6),
+            ],
+          ),
+        );
+      },
+    );
+    if (action == null || !mounted) return;
+    if (action == 3) {
+      setState(() {
+        _vehiclePhotoLocalPath = null;
+        _vehiclePhotoUrlController.clear();
+      });
+      return;
+    }
+    final ImageSource source = action == 2 ? ImageSource.camera : ImageSource.gallery;
+    final XFile? picked = await _imagePicker.pickImage(
+      source: source,
+      imageQuality: 78,
+      maxWidth: 1800,
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _vehiclePhotoLocalPath = picked.path;
+    });
+  }
+
+  Future<String?> _uploadVehiclePhotoIfNeeded() async {
+    if (_vehiclePhotoLocalPath == null || _vehiclePhotoLocalPath!.isEmpty) {
+      return _vehiclePhotoUrlController.text.trim().isEmpty
+          ? null
+          : _vehiclePhotoUrlController.text.trim();
+    }
+    try {
+      final String fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final String uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+      final Reference ref = FirebaseStorage.instance
+          .ref()
+          .child('voyageTrips')
+          .child('vehiclePhotos')
+          .child(uid)
+          .child(fileName);
+      await ref.putFile(File(_vehiclePhotoLocalPath!));
+      final String url = await ref.getDownloadURL();
+      if (mounted) {
+        setState(() {
+          _vehiclePhotoUrlController.text = url;
+          _vehiclePhotoLocalPath = null;
+        });
+      }
+      return url;
+    } catch (_) {
+      _showToast(
+        'Photo non envoyee. Publication sans photo.',
+        backgroundColor: const Color(0xFFB45309),
+        icon: Icons.warning_amber_rounded,
+      );
+      return _vehiclePhotoUrlController.text.trim().isEmpty
+          ? null
+          : _vehiclePhotoUrlController.text.trim();
+    }
   }
 
   LatLng? get _departureLatLng {
@@ -361,6 +535,7 @@ class _AddTripPageState extends State<AddTripPage> {
     _driverController.dispose();
     _phoneController.dispose();
     _vehicleController.dispose();
+    _vehiclePhotoUrlController.dispose();
     _maxWeightController.dispose();
     _notesController.dispose();
     _manualStopAddressController.dispose();
@@ -394,6 +569,7 @@ class _AddTripPageState extends State<AddTripPage> {
       case _TripStep.time:
         return _departureTime != null && !_isDepartureInPast;
       case _TripStep.stops:
+      case _TripStep.authPrompt:
       case _TripStep.review:
         return true;
       case _TripStep.driver:
@@ -512,12 +688,16 @@ class _AddTripPageState extends State<AddTripPage> {
       case _TripStep.review:
         return null;
       case _TripStep.stops:
+      case _TripStep.authPrompt:
         return null;
       case _TripStep.driver:
+        if (_driverController.text.trim().isNotEmpty) return null;
         return _driverFocusNode;
       case _TripStep.contact:
+        if (_phoneController.text.trim().isNotEmpty) return null;
         return _phoneFocusNode;
       case _TripStep.vehicleInfo:
+        if (_vehicleController.text.trim().isNotEmpty) return null;
         return _vehicleFocusNode;
       case _TripStep.proCarrier:
       case _TripStep.frequency:
@@ -1006,13 +1186,18 @@ class _AddTripPageState extends State<AddTripPage> {
         .toList(growable: false);
   }
 
-  Map<String, dynamic> _buildTripPayload() {
+  Map<String, dynamic> _buildTripPayload({String? vehiclePhotoUrl}) {
+    final User? authUser = FirebaseAuth.instance.currentUser;
     return <String, dynamic>{
       'departurePlace': _departureController.text.trim(),
       'arrivalPlace': _arrivalController.text.trim(),
+      'departureLat': _departurePoint.lat,
+      'departureLng': _departurePoint.lng,
+      'arrivalLat': _arrivalPoint.lat,
+      'arrivalLng': _arrivalPoint.lng,
       'arrivalEstimatedTime': _formatDurationMinutes(_routeTotalMinutes),
       'currency': _currency,
-      'vehiclePhotoUrl': null,
+      'vehiclePhotoUrl': vehiclePhotoUrl,
       'intermediateStops': _selectedStopsPayload(),
       'departureDate': _formatApiDate(_departureDate),
       'departureTime': _formatTime(_departureTime),
@@ -1030,8 +1215,8 @@ class _AddTripPageState extends State<AddTripPage> {
       'maxWeightKg': _maxWeightController.text.trim().isEmpty
           ? null
           : double.tryParse(_maxWeightController.text.trim().replaceAll(',', '.')),
-      'ownerUid': null,
-      'ownerEmail': null,
+      'ownerUid': authUser?.uid,
+      'ownerEmail': authUser?.email,
       'status': 'published',
     };
   }
@@ -1176,8 +1361,10 @@ class _AddTripPageState extends State<AddTripPage> {
       _isPublishing = true;
     });
     try {
-      final Map<String, dynamic> payload = _buildTripPayload();
+      final String? vehiclePhotoUrl = await _uploadVehiclePhotoIfNeeded();
+      final Map<String, dynamic> payload = _buildTripPayload(vehiclePhotoUrl: vehiclePhotoUrl);
       final published = await _travelRepository.addTrip(payload);
+      await _saveVehicleToUserIfMissing();
       if (!mounted) return;
 
       final int selectedStopsCount = _intermediateStops.where((stop) => stop.selected).length;
@@ -1749,6 +1936,68 @@ class _AddTripPageState extends State<AddTripPage> {
             ],
           ),
         );
+      case _TripStep.authPrompt:
+        final bool isConnected = FirebaseAuth.instance.currentUser != null;
+        if (isConnected) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _continueFromAuthPrompt();
+          });
+          return const SizedBox.shrink();
+        }
+        return _TripFieldSection(
+          title: 'Infos conducteur',
+          subtitle: 'Connectez-vous pour pre-remplir automatiquement nom, contact et vehicule.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Text(
+                  'Connexion recommandee: vos informations seront enregistrees et reutilisables sur vos prochains trajets.',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF475569),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => _openAuthAndRefresh(AppRoutes.authLogin),
+                  icon: const Icon(Icons.login_rounded),
+                  label: const Text('Se connecter'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _openAuthAndRefresh(AppRoutes.authSignup),
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
+                  label: const Text('Creer un compte'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: _continueFromAuthPrompt,
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  label: const Text('Continuer sans connexion'),
+                ),
+              ),
+            ],
+          ),
+        );
       case _TripStep.driver:
         return _TripFieldSection(
           title: 'Infos conducteur',
@@ -2110,6 +2359,44 @@ class _AddTripPageState extends State<AddTripPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _editVehiclePhotoUrl,
+                  icon: const Icon(Icons.add_a_photo_outlined),
+                  label: Text(
+                    (_vehiclePhotoLocalPath == null &&
+                            _vehiclePhotoUrlController.text.trim().isEmpty)
+                        ? 'Ajouter une photo (optionnel)'
+                        : 'Modifier la photo',
+                  ),
+                ),
+              ),
+              if (_vehiclePhotoLocalPath != null ||
+                  _vehiclePhotoUrlController.text.trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    height: 140,
+                    width: double.infinity,
+                    color: const Color(0xFFF8FAFC),
+                    child: _vehiclePhotoLocalPath != null
+                        ? Image.file(
+                            File(_vehiclePhotoLocalPath!),
+                            fit: BoxFit.cover,
+                          )
+                        : Image.network(
+                            _vehiclePhotoUrlController.text.trim(),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Center(
+                              child: Text('Image indisponible'),
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               _SummaryRow(label: 'Trajet', value: _tripTitle),
               _SummaryRow(
                 label: 'Depart',
@@ -2127,6 +2414,13 @@ class _AddTripPageState extends State<AddTripPage> {
                 label: 'Vehicule',
                 value:
                     '${_vehicleController.text.trim()} (${_isBus ? 'Transporteur pro' : 'Vehicule leger'})',
+              ),
+              _SummaryRow(
+                label: 'Photo',
+                value: (_vehiclePhotoLocalPath == null &&
+                        _vehiclePhotoUrlController.text.trim().isEmpty)
+                    ? 'Non ajoutee'
+                    : 'Ajoutee',
               ),
               _SummaryRow(label: 'Frequence', value: frequencyLabel),
               _SummaryRow(

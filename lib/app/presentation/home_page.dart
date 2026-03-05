@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 
 enum HomeMode { travel, parcels }
@@ -111,13 +112,36 @@ class _HomePageState extends State<HomePage> {
   }
 
   @override
+  void initState() {
+    super.initState();
+  }
+
+  Future<void> _openAccount() async {
+    final User? user = FirebaseAuth.instance.currentUser;
+    final String route = user == null ? AppRoutes.authLogin : AppRoutes.userAccount;
+    await Navigator.of(context).pushNamed(route);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final bool isTravel = _activeMode == HomeMode.travel;
     final Color accent = isTravel ? const Color(0xFF0B5FFF) : const Color(0xFF0A5C36);
     final List<HomeMenuItem> items = _activeItems;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('GoVIP Services')),
+      appBar: AppBar(
+        title: const Text('GoVIP Services'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: IconButton(
+              tooltip: 'Mon compte',
+              onPressed: _openAccount,
+              icon: const Icon(Icons.account_circle_rounded),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Column(
           children: [

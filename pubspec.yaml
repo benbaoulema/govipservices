@@ -38,6 +38,11 @@ dependencies:
   cupertino_icons: ^1.0.8
   firebase_core: ^4.1.1
   cloud_firestore: ^6.0.3
+  firebase_auth: ^6.1.1
+  firebase_storage: ^13.0.2
+  image_picker: ^1.1.2
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
   flutter_svg: ^2.2.2
   geocoding: ^4.0.0
   geolocator: ^14.0.2
@@ -53,6 +58,9 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
+  build_runner: ^2.4.13
+  freezed: ^2.5.7
+  json_serializable: ^6.9.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
