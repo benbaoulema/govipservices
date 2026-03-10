@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:govipservices/app/presentation/intro_page.dart';
 import 'package:govipservices/app/router/app_router.dart';
-import 'package:govipservices/app/router/app_routes.dart';
 
 class GoVipApp extends StatelessWidget {
   const GoVipApp({super.key});
+
+  static const Color _turquoise = Color(0xFF14B8A6);
+  static const Color _turquoiseDark = Color(0xFF0F766E);
 
   @override
   Widget build(BuildContext context) {
@@ -12,7 +15,35 @@ class GoVipApp extends StatelessWidget {
       title: 'GoVIP Services',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0A5C36)),
+        colorScheme: ColorScheme.fromSeed(seedColor: _turquoise),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: _turquoise,
+          foregroundColor: Colors.white,
+          centerTitle: true,
+          surfaceTintColor: Colors.transparent,
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: _turquoise,
+          iconTheme: WidgetStateProperty.resolveWith<IconThemeData?>(
+            (states) => IconThemeData(
+              color: states.contains(WidgetState.selected)
+                  ? Colors.white
+                  : Colors.white.withOpacity(0.8),
+            ),
+          ),
+          labelTextStyle: WidgetStateProperty.resolveWith<TextStyle?>(
+            (states) => TextStyle(
+              color: states.contains(WidgetState.selected)
+                  ? Colors.white
+                  : Colors.white.withOpacity(0.82),
+              fontWeight: states.contains(WidgetState.selected)
+                  ? FontWeight.w700
+                  : FontWeight.w600,
+            ),
+          ),
+          indicatorColor: _turquoiseDark,
+          surfaceTintColor: Colors.transparent,
+        ),
         useMaterial3: true,
       ),
       locale: const Locale('fr', 'FR'),
@@ -25,7 +56,7 @@ class GoVipApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      initialRoute: AppRoutes.home,
+      home: const IntroGatePage(),
       onGenerateRoute: AppRouter.onGenerateRoute,
     );
   }

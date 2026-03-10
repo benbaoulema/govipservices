@@ -142,4 +142,54 @@ class TripDetailCubit extends ChangeNotifier {
     _state = _state.copyWith(selectedSeats: next);
     notifyListeners();
   }
+
+  Future<void> selectDepartureNode(int departureIndex) async {
+    final TripSegmentModel? currentSegment = _state.segment;
+    final List<TripRouteNode> nodes = _state.nodes;
+    if (currentSegment == null || nodes.isEmpty) return;
+    if (departureIndex < 0 || departureIndex >= nodes.length) return;
+    if (departureIndex >= currentSegment.arrivalIndex) return;
+
+    final TripSegmentModel? nextSegment = _resolveTripSegment(
+      nodes: nodes,
+      from: nodes[departureIndex].address,
+      to: currentSegment.arrivalNode.address,
+    );
+    if (nextSegment == null) return;
+
+    final String? computedArrivalTime = await _computeSegmentArrivalTime(segment: nextSegment);
+    final TripSegmentModel finalSegment = computedArrivalTime == null || computedArrivalTime.isEmpty
+        ? nextSegment
+        : nextSegment.copyWith(
+            arrivalNode: nextSegment.arrivalNode.copyWith(time: computedArrivalTime),
+          );
+
+    _state = _state.copyWith(segment: finalSegment);
+    notifyListeners();
+  }
+
+  Future<void> selectArrivalNode(int arrivalIndex) async {
+    final TripSegmentModel? currentSegment = _state.segment;
+    final List<TripRouteNode> nodes = _state.nodes;
+    if (currentSegment == null || nodes.isEmpty) return;
+    if (arrivalIndex < 0 || arrivalIndex >= nodes.length) return;
+    if (arrivalIndex <= currentSegment.departureIndex) return;
+
+    final TripSegmentModel? nextSegment = _resolveTripSegment(
+      nodes: nodes,
+      from: currentSegment.departureNode.address,
+      to: nodes[arrivalIndex].address,
+    );
+    if (nextSegment == null) return;
+
+    final String? computedArrivalTime = await _computeSegmentArrivalTime(segment: nextSegment);
+    final TripSegmentModel finalSegment = computedArrivalTime == null || computedArrivalTime.isEmpty
+        ? nextSegment
+        : nextSegment.copyWith(
+            arrivalNode: nextSegment.arrivalNode.copyWith(time: computedArrivalTime),
+          );
+
+    _state = _state.copyWith(segment: finalSegment);
+    notifyListeners();
+  }
 }

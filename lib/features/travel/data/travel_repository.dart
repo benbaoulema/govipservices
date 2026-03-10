@@ -150,6 +150,8 @@ class TravelRepository implements TravelService {
 
       final Map<String, dynamic> raw = <String, dynamic>{
         ...trip.raw,
+        'isIntermediateDeparture': fromNode.kind == 'stop',
+        'isIntermediateArrival': toNode.kind == 'stop',
       };
       if (segmentArrivalTime != null && segmentArrivalTime.isNotEmpty) {
         raw['arrivalEstimatedTime'] = segmentArrivalTime;
@@ -187,6 +189,37 @@ class TravelRepository implements TravelService {
     });
 
     return results;
+  }
+
+  Future<List<TripSearchResult>> fetchFeaturedProTrips({int limit = 6}) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _firestore
+        .collection('voyageTrips')
+        .where('status', isEqualTo: 'published')
+        .limit(limit * 3)
+        .get();
+
+    final List<TripSearchResult> trips = snapshot.docs
+        .map(_tripFromDoc)
+        .whereType<TripSearchResult>()
+        .where((TripSearchResult trip) => (trip.seats ?? 0) > 0)
+        .toList(growable: false);
+
+    trips.sort((a, b) {
+      final bool aPro = a.raw['isBus'] == true;
+      final bool bPro = b.raw['isBus'] == true;
+      if (aPro != bPro) return aPro ? -1 : 1;
+
+      final double aPrice = a.pricePerSeat ?? 0;
+      final double bPrice = b.pricePerSeat ?? 0;
+      final int priceCompare = aPrice.compareTo(bPrice);
+      if (priceCompare != 0) return priceCompare;
+
+      final String aTime = a.departureTime ?? '99:99';
+      final String bTime = b.departureTime ?? '99:99';
+      return aTime.compareTo(bTime);
+    });
+
+    return trips.take(limit).toList(growable: false);
   }
 
   Future<String?> _computeIntermediateSegmentArrivalTime({

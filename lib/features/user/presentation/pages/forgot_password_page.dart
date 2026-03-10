@@ -56,7 +56,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Mot de passe oublie')),
+      appBar: AppBar(title: const Text('Mot de passe oubli\u00E9')),
       body: Container(
         width: double.infinity,
         decoration: const BoxDecoration(

@@ -1,4 +1,4 @@
-﻿class RouteHub {
+class RouteHub {
   const RouteHub({
     required this.id,
     required this.address,

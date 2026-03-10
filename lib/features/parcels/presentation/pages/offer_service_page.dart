@@ -9,7 +9,7 @@ class OfferServicePage extends StatelessWidget {
     return const FeaturePlaceholderPage(
       title: 'Proposer un service',
       description:
-          'Ecran pour publier une offre de transport: zone, tarif, capacite et disponibilite.',
+          '\u00C9cran pour publier une offre de transport : zone, tarif, capacit\u00E9 et disponibilit\u00E9.',
     );
   }
 }

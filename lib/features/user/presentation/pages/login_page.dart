@@ -169,7 +169,7 @@ class _LoginPageState extends State<LoginPage> {
                             alignment: Alignment.centerRight,
                             child: TextButton(
                               onPressed: () => Navigator.of(context).pushNamed(AppRoutes.authForgotPassword),
-                              child: const Text('Mot de passe oublie ?'),
+                              child: const Text('Mot de passe oubli\u00E9 ?'),
                             ),
                           ),
                           const SizedBox(height: 6),
@@ -187,7 +187,7 @@ class _LoginPageState extends State<LoginPage> {
                               const Text('Pas encore de compte ?'),
                               TextButton(
                                 onPressed: () => Navigator.of(context).pushNamed(AppRoutes.authSignup),
-                                child: const Text('Creer un compte'),
+                                child: const Text('Cr\u00E9er un compte'),
                               ),
                             ],
                           ),

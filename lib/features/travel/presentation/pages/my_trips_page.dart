@@ -9,7 +9,7 @@ class MyTripsPage extends StatelessWidget {
     return const FeaturePlaceholderPage(
       title: 'Mes trajets',
       description:
-          'Ecran de gestion des trajets publies et reserves avec historique et statut.',
+          '\u00C9cran de gestion des trajets publi\u00E9s et r\u00E9serv\u00E9s avec historique et statut.',
     );
   }
 }

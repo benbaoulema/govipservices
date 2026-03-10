@@ -102,7 +102,7 @@ class _AddressAutocompleteFieldState extends State<AddressAutocompleteField>
       setState(() {
         _isLoading = false;
         _suggestions = const <PlaceSuggestion>[];
-        _errorText = 'Cle Google Maps absente. Lancez l app avec --dart-define=GOOGLE_MAPS_API_KEY=...';
+        _errorText = 'Cl\u00E9 Google Maps absente. Lancez l\'app avec --dart-define=GOOGLE_MAPS_API_KEY=...';
       });
       return;
     }
@@ -128,7 +128,7 @@ class _AddressAutocompleteFieldState extends State<AddressAutocompleteField>
       setState(() {
         _isLoading = false;
         _suggestions = const <PlaceSuggestion>[];
-        _errorText = 'Impossible de recuperer les suggestions.';
+        _errorText = 'Impossible de r\u00E9cup\u00E9rer les suggestions.';
       });
     }
   }

@@ -425,7 +425,7 @@ class _AddTripPageState extends State<AddTripPage> {
         Marker(
           markerId: const MarkerId('departure'),
           position: departure,
-          infoWindow: InfoWindow(title: 'Depart', snippet: _departurePoint.address),
+          infoWindow: InfoWindow(title: 'D\u00E9part', snippet: _departurePoint.address),
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
         ),
       );
@@ -435,7 +435,7 @@ class _AddTripPageState extends State<AddTripPage> {
         Marker(
           markerId: const MarkerId('arrival'),
           position: arrival,
-          infoWindow: InfoWindow(title: 'Arrivee', snippet: _arrivalPoint.address),
+          infoWindow: InfoWindow(title: 'Arriv\u00E9e', snippet: _arrivalPoint.address),
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
         ),
       );
@@ -862,7 +862,7 @@ class _AddTripPageState extends State<AddTripPage> {
       setState(() {
         _hasAttemptedRouteSuggestions = true;
         _routeStopsError =
-            'Cle Google Maps absente pour le calcul des suggestions (GOOGLE_MAPS_API_KEY).';
+            'Cl\u00E9 Google Maps absente pour le calcul des suggestions (GOOGLE_MAPS_API_KEY).';
         _routeTrafficNote = null;
         _routeTotalMinutes = null;
         _routePolylinePoints = <LatLng>[];
@@ -940,7 +940,7 @@ class _AddTripPageState extends State<AddTripPage> {
             _routeStopsError = 'Google Directions status: $status$suffix';
           } else {
             _routeStopsError =
-                'Aucune proposition automatique sur ce trajet. Ajoutez un arret manuellement.';
+                'Aucune proposition automatique sur ce trajet. Ajoutez un arr\u00EAt manuellement.';
           }
         } else {
           _routeStopsError = null;
@@ -951,7 +951,7 @@ class _AddTripPageState extends State<AddTripPage> {
       debugPrint('[stops] exception while loading suggestions');
       if (!mounted) return;
       setState(() {
-        _routeStopsError = 'Impossible de calculer les arrets suggeres.';
+        _routeStopsError = 'Impossible de calculer les arr\u00EAts sugg\u00E9r\u00E9s.';
         _routeTrafficNote = null;
         _routeTotalMinutes = null;
         _routePolylinePoints = <LatLng>[];
@@ -1040,7 +1040,7 @@ class _AddTripPageState extends State<AddTripPage> {
     } catch (_) {
       if (!mounted) return;
       _showToast(
-        'Impossible de recuperer votre position actuelle.',
+        'Impossible de r\u00E9cup\u00E9rer votre position actuelle.',
         backgroundColor: const Color(0xFF991B1B),
         icon: Icons.error_outline_rounded,
       );
@@ -1251,7 +1251,7 @@ class _AddTripPageState extends State<AddTripPage> {
     final String address = _manualStopAddressController.text.trim();
     if (address.isEmpty) {
       _showToast(
-        'Veuillez saisir une adresse d\'arret.',
+        'Veuillez saisir une adresse d\'arr\u00EAt.',
         backgroundColor: const Color(0xFFB45309),
         icon: Icons.edit_location_alt_outlined,
       );
@@ -1380,7 +1380,7 @@ class _AddTripPageState extends State<AddTripPage> {
       _showToast(
         published.wasCreated
             ? 'Trajet publie avec succes.'
-            : 'Ce trajet existe deja.',
+            : 'Ce trajet existe d\u00E9j\u00E0.',
         backgroundColor: const Color(0xFF166534),
         icon: published.wasCreated ? Icons.check_circle_rounded : Icons.info_outline_rounded,
       );
@@ -1402,14 +1402,14 @@ class _AddTripPageState extends State<AddTripPage> {
       case _TripStep.departure:
         return _TripFieldSection(
           title: "D'ou partez-vous ?",
-          subtitle: 'Choisissez votre depart ou utilisez votre position actuelle.',
+          subtitle: 'Choisissez votre d\u00E9part ou utilisez votre position actuelle.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AddressAutocompleteField(
                 controller: _departureController,
                 apiKey: _googleMapsApiKey,
-                labelText: 'Adresse de depart',
+                labelText: 'Adresse de d\u00E9part',
                 hintText: 'Ex: Cocody, Abidjan',
                 focusNode: _departureFocusNode,
                 onChanged: _updateDepartureAddressText,
@@ -1444,12 +1444,12 @@ class _AddTripPageState extends State<AddTripPage> {
         );
       case _TripStep.arrival:
         return _TripFieldSection(
-          title: 'Ou allez-vous ?',
+          title: 'O\u00F9 allez-vous ?',
           subtitle: 'Entrez votre destination principale.',
           child: AddressAutocompleteField(
             controller: _arrivalController,
             apiKey: _googleMapsApiKey,
-            labelText: 'Adresse d arrivee',
+            labelText: 'Adresse d\'arriv\u00E9e',
             hintText: 'Ex: Plateau, Abidjan',
             focusNode: _arrivalFocusNode,
             onChanged: _updateArrivalAddressText,
@@ -1638,7 +1638,7 @@ class _AddTripPageState extends State<AddTripPage> {
         );
       case _TripStep.stops:
         return _TripFieldSection(
-          title: 'Arrets intermediaires',
+          title: 'Arr\u00EAts interm\u00E9diaires',
           subtitle: 'Suggestions automatiques sur le trajet + ajout manuel.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1690,7 +1690,7 @@ class _AddTripPageState extends State<AddTripPage> {
                     border: Border.all(color: const Color(0xFFBFDBFE)),
                   ),
                   child: const Text(
-                    'Calcul des arrets suggeres...',
+                    'Calcul des arr\u00EAts sugg\u00E9r\u00E9s...',
                     style: TextStyle(fontSize: 12.5, color: Color(0xFF1D4ED8)),
                   ),
                 ),
@@ -1700,7 +1700,7 @@ class _AddTripPageState extends State<AddTripPage> {
                 child: TextButton.icon(
                   onPressed: _isLoadingRouteStops ? null : _refreshRouteStopSuggestions,
                   icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('Rafraichir suggestions'),
+                  label: const Text('Rafra\u00EEchir suggestions'),
                 ),
               ),
               Container(
@@ -1717,10 +1717,10 @@ class _AddTripPageState extends State<AddTripPage> {
                       : _routeStopsError != null
                           ? 'Diagnostic suggestions: $_routeStopsError'
                           : _routeStopsCount > 0
-                              ? 'Diagnostic suggestions: $_routeStopsCount proposition(s) automatique(s) trouvee(s).'
+                              ? 'Diagnostic suggestions: $_routeStopsCount proposition(s) automatique(s) trouv\u00E9e(s).'
                               : _hasAttemptedRouteSuggestions
                                   ? 'Diagnostic suggestions: 0 proposition automatique pour ce trajet.'
-                                  : 'Diagnostic suggestions: cliquez sur "Rafraichir suggestions".',
+                                  : 'Diagnostic suggestions: cliquez sur "Rafra\u00EEchir suggestions".',
                   style: const TextStyle(fontSize: 12.5),
                 ),
               ),
@@ -1742,7 +1742,7 @@ class _AddTripPageState extends State<AddTripPage> {
                   child: Text(
                     _showManualStopForm
                         ? 'Masquer le formulaire'
-                        : 'Ajouter un trajet intermediaire',
+                        : 'Ajouter un trajet interm\u00E9diaire',
                   ),
                 ),
               ),
@@ -1750,7 +1750,7 @@ class _AddTripPageState extends State<AddTripPage> {
                 AddressAutocompleteField(
                   controller: _manualStopAddressController,
                   apiKey: _googleMapsApiKey,
-                  labelText: 'Adresse arret',
+                  labelText: 'Adresse arr\u00EAt',
                   hintText: 'Ex: Gare, rond-point, commune',
                   focusNode: _manualStopFocusNode,
                   onChanged: (value) {
@@ -1805,13 +1805,13 @@ class _AddTripPageState extends State<AddTripPage> {
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: _addManualStop,
-                    child: const Text('Ajouter cet arret'),
+                    child: const Text('Ajouter cet arr\u00EAt'),
                   ),
                 ),
               ],
               const SizedBox(height: 14),
               if (_intermediateStops.isEmpty)
-                const _InlineInfo(text: 'Aucun arret ajoute pour le moment.')
+                const _InlineInfo(text: 'Aucun arr\u00EAt ajout\u00E9 pour le moment.')
               else
                 ..._intermediateStops.map(
                   (stop) => Container(
@@ -1983,7 +1983,7 @@ class _AddTripPageState extends State<AddTripPage> {
                 child: OutlinedButton.icon(
                   onPressed: () => _openAuthAndRefresh(AppRoutes.authSignup),
                   icon: const Icon(Icons.person_add_alt_1_rounded),
-                  label: const Text('Creer un compte'),
+                  label: const Text('Cr\u00E9er un compte'),
                 ),
               ),
               const SizedBox(height: 8),
@@ -2104,7 +2104,7 @@ class _AddTripPageState extends State<AddTripPage> {
                 textInputAction: TextInputAction.done,
                 onFieldSubmitted: (_) => _dismissKeyboard(),
                 decoration: _clearableDecoration(
-                  labelText: 'Telephone',
+                  labelText: 'T\u00E9l\u00E9phone',
                   hintText: '+225 07 00 00 00 00',
                   controller: _phoneController,
                   onCleared: () {
@@ -2170,8 +2170,8 @@ class _AddTripPageState extends State<AddTripPage> {
                 textInputAction: TextInputAction.done,
                 onFieldSubmitted: (_) => _dismissKeyboard(),
                 decoration: _clearableDecoration(
-                  labelText: 'Vehicule',
-                  hintText: 'Marque - Modele - Couleur',
+                  labelText: 'V\u00E9hicule',
+                  hintText: 'Marque - Mod\u00E8le - Couleur',
                   controller: _vehicleController,
                   onCleared: () {
                     setState(() {
@@ -2225,7 +2225,7 @@ class _AddTripPageState extends State<AddTripPage> {
           (value: 'monthly', label: 'Mensuel'),
         ];
         return _TripFieldSection(
-          title: 'Frequence',
+          title: 'Fr\u00E9quence',
           subtitle: 'Ponctuel est selectionne par defaut.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -2399,7 +2399,7 @@ class _AddTripPageState extends State<AddTripPage> {
               ],
               _SummaryRow(label: 'Trajet', value: _tripTitle),
               _SummaryRow(
-                label: 'Depart',
+                label: 'D\u00E9part',
                 value: '${_formatDate(_departureDate)} - ${_formatTime(_departureTime)}',
               ),
               _SummaryRow(
@@ -2411,18 +2411,18 @@ class _AddTripPageState extends State<AddTripPage> {
                 value: '${_driverController.text.trim()} (${_phoneController.text.trim()})',
               ),
               _SummaryRow(
-                label: 'Vehicule',
+                label: 'V\u00E9hicule',
                 value:
-                    '${_vehicleController.text.trim()} (${_isBus ? 'Transporteur pro' : 'Vehicule leger'})',
+                    '${_vehicleController.text.trim()} (${_isBus ? 'Transporteur pro' : 'V\u00E9hicule l\u00E9ger'})',
               ),
               _SummaryRow(
                 label: 'Photo',
                 value: (_vehiclePhotoLocalPath == null &&
                         _vehiclePhotoUrlController.text.trim().isEmpty)
-                    ? 'Non ajoutee'
+                    ? 'Non ajout\u00E9e'
                     : 'Ajoutee',
               ),
-              _SummaryRow(label: 'Frequence', value: frequencyLabel),
+              _SummaryRow(label: 'Fr\u00E9quence', value: frequencyLabel),
               _SummaryRow(
                 label: 'Poids max',
                 value: _maxWeightController.text.trim().isEmpty

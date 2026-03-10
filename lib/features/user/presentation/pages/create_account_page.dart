@@ -138,7 +138,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     } catch (e, s) {
       debugPrint('signup unknown error: $e');
       debugPrintStack(stackTrace: s);
-      _showMessage('Creation du compte impossible pour le moment. [$e]', error: true);
+      _showMessage('Cr\u00E9ation du compte impossible pour le moment. [$e]', error: true);
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -226,7 +226,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                                   keyboardType: TextInputType.phone,
                                   textInputAction: TextInputAction.next,
                                   decoration: const InputDecoration(
-                                    labelText: 'Telephone (optionnel)',
+                                    labelText: 'T\u00E9l\u00E9phone (optionnel)',
                                     prefixIcon: Icon(Icons.phone_outlined),
                                   ),
                                 ),
@@ -284,14 +284,14 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                             width: double.infinity,
                             child: FilledButton(
                               onPressed: _isSubmitting ? null : _submit,
-                              child: Text(_isSubmitting ? 'Creation...' : 'Creer mon compte'),
+                              child: Text(_isSubmitting ? 'Cr\u00E9ation...' : 'Cr\u00E9er mon compte'),
                             ),
                           ),
                           const SizedBox(height: 10),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Text('Deja inscrit ?'),
+                              const Text('D\u00E9j\u00E0 inscrit ?'),
                               TextButton(
                                 onPressed: () => Navigator.of(context).pushReplacementNamed(
                                   AppRoutes.authLogin,
@@ -316,13 +316,13 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   String _authErrorToText(FirebaseAuthException e) {
     switch (e.code) {
       case 'email-already-in-use':
-        return 'Cet email est deja utilise.';
+        return 'Cet email est d\u00E9j\u00E0 utilis\u00E9.';
       case 'weak-password':
         return 'Mot de passe trop faible.';
       case 'invalid-email':
-        return 'Format d email invalide.';
+        return 'Format d\'email invalide.';
       default:
-        return e.message ?? 'Creation du compte impossible.';
+        return e.message ?? 'Cr\u00E9ation du compte impossible.';
     }
   }
 }
@@ -346,12 +346,12 @@ class _SignupHeader extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          'Creer un compte',
+          'Cr\u00E9er un compte',
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 4),
         Text(
-          'Inscription rapide pour reserver ou publier vos trajets.',
+          'Inscription rapide pour r\u00E9server ou publier vos trajets.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: const Color(0xFF475569)),
         ),
       ],

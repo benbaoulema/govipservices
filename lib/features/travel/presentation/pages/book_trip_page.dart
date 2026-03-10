@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
@@ -7,6 +8,13 @@ import 'package:govipservices/features/travel/domain/models/trip_detail_models.d
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
 
 enum _BookingDateChoice { today, tomorrow, custom }
+
+const Color _travelAccent = Color(0xFF14B8A6);
+const Color _travelAccentDark = Color(0xFF0F766E);
+const Color _travelAccentSoft = Color(0xFFD9FFFA);
+const Color _travelPageBg = Color(0xFFF2FFFC);
+const Color _travelPageBgAlt = Color(0xFFE6FFFA);
+const Color _travelSurfaceBorder = Color(0xFFD8F3EE);
 
 class BookTripPage extends StatefulWidget {
   const BookTripPage({super.key});
@@ -166,7 +174,7 @@ class _BookTripPageState extends State<BookTripPage> {
     _departureController.text = resolvedAddress;
     _departureController.selection = TextSelection.collapsed(offset: resolvedAddress.length);
     _cachedCurrentLocationAddress = resolvedAddress;
-    _showMessage('Depart renseigne depuis votre position.');
+    _showMessage('D\u00E9part renseign\u00E9 depuis votre position.');
     await _handleDepartureConfirmed();
   }
 
@@ -201,7 +209,7 @@ class _BookTripPageState extends State<BookTripPage> {
       }
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         _showMessage(
-          'Autorisez la localisation pour pre-remplir votre depart.',
+          'Autorisez la localisation pour pr\u00E9-remplir votre d\u00E9part.',
           icon: Icons.lock_outline,
         );
         return;
@@ -210,7 +218,7 @@ class _BookTripPageState extends State<BookTripPage> {
       final String? resolvedAddress = await _resolveCurrentLocationAddress();
       if (resolvedAddress == null) {
         _showMessage(
-          'Impossible de recuperer votre position actuelle.',
+          'Impossible de r\u00E9cup\u00E9rer votre position actuelle.',
           icon: Icons.error_outline,
         );
         return;
@@ -218,7 +226,7 @@ class _BookTripPageState extends State<BookTripPage> {
       await _applyCurrentLocationAsDeparture(resolvedAddress);
     } catch (_) {
       _showMessage(
-        'Impossible de recuperer votre position actuelle.',
+        'Impossible de r\u00E9cup\u00E9rer votre position actuelle.',
         icon: Icons.error_outline,
       );
     } finally {
@@ -261,13 +269,13 @@ class _BookTripPageState extends State<BookTripPage> {
     final String arrival = _arrivalController.text.trim();
 
     if (departure.length < 3) {
-      _showMessage('Renseignez un depart valide.', icon: Icons.edit_location_alt_outlined);
+      _showMessage('Renseignez un départ valide.', icon: Icons.edit_location_alt_outlined);
       await _goToStep(0);
       return;
     }
 
     if (arrival.length < 3) {
-      _showMessage('Renseignez une arrivee valide.', icon: Icons.pin_drop_outlined);
+      _showMessage('Renseignez une arrivée valide.', icon: Icons.pin_drop_outlined);
       return;
     }
 
@@ -288,7 +296,7 @@ class _BookTripPageState extends State<BookTripPage> {
       await _showSearchResultsBottomSheet(results);
     } catch (_) {
       _showMessage(
-        'Erreur lors de la recherche des trajets. Verifiez votre connexion.',
+        'Erreur lors de la recherche des trajets. V\u00E9rifiez votre connexion.',
         icon: Icons.error_outline,
       );
     } finally {
@@ -335,7 +343,7 @@ class _BookTripPageState extends State<BookTripPage> {
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 24),
                             child: Text(
-                              'Aucun trajet trouve pour ce jour.\nEssayez une autre arrivee ou une autre date.',
+                              'Aucun trajet trouv\u00E9 pour ce jour.\nEssayez une autre arrivée ou une autre date.',
                               textAlign: TextAlign.center,
                               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     color: const Color(0xFF5B647A),
@@ -361,7 +369,10 @@ class _BookTripPageState extends State<BookTripPage> {
                                 ),
                               );
                             },
-                          ),
+                          )
+                              .animate()
+                              .fadeIn(delay: Duration(milliseconds: 40 * index), duration: 220.ms)
+                              .slideY(begin: 0.08, end: 0),
                           separatorBuilder: (_, __) => const SizedBox(height: 10),
                           itemCount: results.length,
                         ),
@@ -392,6 +403,13 @@ class _BookTripPageState extends State<BookTripPage> {
     final String month = date.month.toString().padLeft(2, '0');
     final String year = date.year.toString();
     return '$day/$month/$year';
+  }
+
+  Widget _animateEntrance(Widget child, {int delayMs = 0}) {
+    return child
+        .animate()
+        .fadeIn(delay: Duration(milliseconds: delayMs), duration: 300.ms)
+        .slideY(begin: 0.08, end: 0, curve: Curves.easeOutCubic);
   }
 
   Widget _buildAnimatedStepCard({
@@ -431,26 +449,20 @@ class _BookTripPageState extends State<BookTripPage> {
     final bool isKeyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F8FF),
-      appBar: AppBar(
-        title: const Text('Reserver'),
-        elevation: 0,
-        backgroundColor: Colors.transparent,
-      ),
+      backgroundColor: _travelPageBg,
       body: DecoratedBox(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFFEAF0FF),
-              Color(0xFFF6F8FF),
+              _travelPageBgAlt,
+              _travelPageBg,
               Color(0xFFFFFFFF),
             ],
           ),
         ),
         child: SafeArea(
-          top: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: Column(
@@ -465,7 +477,7 @@ class _BookTripPageState extends State<BookTripPage> {
                           onStepTap: (step) {
                             _goToStep(step);
                           },
-                        ),
+                        ).animate().fadeIn(duration: 320.ms).slideY(begin: 0.08, end: 0),
                 ),
                 SizedBox(height: isKeyboardVisible ? 6 : 14),
                 Expanded(
@@ -484,9 +496,10 @@ class _BookTripPageState extends State<BookTripPage> {
                     children: [
                       _buildAnimatedStepCard(
                         index: 0,
-                        child: _StepCard(
+                        child: _animateEntrance(
+                          _StepCard(
                           icon: Icons.trip_origin_rounded,
-                          title: 'Depart',
+                          title: 'D\u00E9part',
                           subtitle: '',
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -494,7 +507,7 @@ class _BookTripPageState extends State<BookTripPage> {
                               AddressAutocompleteField(
                                 controller: _departureController,
                                 focusNode: _departureFocusNode,
-                                labelText: 'Adresse de depart',
+                                labelText: 'Adresse de d\u00E9part',
                                 hintText: 'Ex: Cocody, Abidjan',
                                 apiKey: _googleMapsApiKey,
                                 onChanged: _handleDepartureChanged,
@@ -522,12 +535,15 @@ class _BookTripPageState extends State<BookTripPage> {
                             ],
                           ),
                         ),
+                        delayMs: 40,
+                        ),
                       ),
                       _buildAnimatedStepCard(
                         index: 1,
-                        child: _StepCard(
+                        child: _animateEntrance(
+                          _StepCard(
                           icon: Icons.flag_circle_outlined,
-                          title: 'Arrivee',
+                          title: 'Arriv\u00E9e',
                           subtitle: '',
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -535,7 +551,7 @@ class _BookTripPageState extends State<BookTripPage> {
                               AddressAutocompleteField(
                                 controller: _arrivalController,
                                 focusNode: _arrivalFocusNode,
-                                labelText: 'Adresse d arrivee',
+                                labelText: 'Adresse d\'arriv\u00E9e',
                                 hintText: 'Ex: Plateau, Abidjan',
                                 apiKey: _googleMapsApiKey,
                                 onChanged: (_) => setState(() {}),
@@ -572,7 +588,7 @@ class _BookTripPageState extends State<BookTripPage> {
                               ),
                               const SizedBox(height: 10),
                               Text(
-                                'Date choisie: ${_formatSelectedDateLabel()}',
+                                'Date choisie : ${_formatSelectedDateLabel()}',
                                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                       color: const Color(0xFF5B647A),
                                       fontWeight: FontWeight.w700,
@@ -580,6 +596,8 @@ class _BookTripPageState extends State<BookTripPage> {
                               ),
                             ],
                           ),
+                        ),
+                        delayMs: 90,
                         ),
                       ),
                     ],
@@ -591,7 +609,7 @@ class _BookTripPageState extends State<BookTripPage> {
                   child: FilledButton.icon(
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 15),
-                      backgroundColor: const Color(0xFF0B5FFF),
+                      backgroundColor: _travelAccent,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                     onPressed: _isSearchingTrips
@@ -609,10 +627,12 @@ class _BookTripPageState extends State<BookTripPage> {
                     label: Text(
                       _isSearchingTrips
                           ? 'Recherche en cours...'
-                          : (_currentStep == 0 ? 'Continuer vers arrivee' : 'Rechercher des trajets'),
+                          : (_currentStep == 0 ? 'Continuer vers arriv\u00E9e' : 'Rechercher des trajets'),
                     ),
-                  ),
-                ),
+                  )
+                      .animate(target: _isSearchingTrips ? 1 : 0)
+                      .scale(begin: const Offset(1, 1), end: const Offset(0.985, 0.985), duration: 180.ms),
+                ).animate().fadeIn(delay: 120.ms, duration: 260.ms).slideY(begin: 0.12, end: 0),
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 220),
                   child: _lastResults.isEmpty
@@ -620,13 +640,13 @@ class _BookTripPageState extends State<BookTripPage> {
                       : Padding(
                           padding: const EdgeInsets.only(top: 10),
                           child: Text(
-                            '${_lastResults.length} resultat(s) trouves lors de la derniere recherche.',
+                            '${_lastResults.length} r\u00E9sultat(s) trouv\u00E9s lors de la derni\u00E8re recherche.',
                             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                   color: const Color(0xFF5B647A),
                                   fontWeight: FontWeight.w600,
                                 ),
                           ),
-                        ),
+                        ).animate().fadeIn(duration: 220.ms).slideY(begin: 0.18, end: 0),
                 ),
               ],
             ),
@@ -656,11 +676,11 @@ class _TopHero extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF0B5FFF), Color(0xFF1F8BFF)],
+          colors: [_travelAccentDark, _travelAccent],
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0B5FFF).withOpacity(0.26),
+            color: _travelAccent.withOpacity(0.22),
             blurRadius: 24,
             offset: const Offset(0, 12),
           ),
@@ -678,7 +698,7 @@ class _TopHero extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '1. Depart  2. Arrivee + date',
+            '1. D\u00E9part  2. Arriv\u00E9e + date',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: Colors.white.withOpacity(0.9),
             ),
@@ -688,7 +708,7 @@ class _TopHero extends StatelessWidget {
             children: [
               Expanded(
                 child: _ProgressStep(
-                  label: 'Depart',
+                  label: 'D\u00E9part',
                   selected: currentStep == 0,
                   onTap: () => onStepTap(0),
                 ),
@@ -696,7 +716,7 @@ class _TopHero extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: _ProgressStep(
-                  label: 'Arrivee',
+                  label: 'Arriv\u00E9e',
                   selected: currentStep == 1,
                   onTap: () => onStepTap(1),
                 ),
@@ -735,7 +755,7 @@ class _ProgressStep extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontWeight: FontWeight.w700,
-              color: selected ? const Color(0xFF0B5FFF) : Colors.white,
+              color: selected ? _travelAccentDark : Colors.white,
             ),
           ),
         ),
@@ -765,7 +785,7 @@ class _StepCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFE8EDFB)),
+        border: Border.all(color: _travelSurfaceBorder),
         boxShadow: [
           BoxShadow(
             color: const Color(0xFF14387B).withOpacity(0.07),
@@ -785,10 +805,10 @@ class _StepCard extends StatelessWidget {
                   width: 38,
                   height: 38,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEAF0FF),
+                    color: _travelAccentSoft,
                     borderRadius: BorderRadius.circular(11),
                   ),
-                  child: Icon(icon, color: const Color(0xFF0B5FFF)),
+                  child: Icon(icon, color: _travelAccentDark),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -840,7 +860,7 @@ class _DateChoiceChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? const Color(0xFF0B5FFF) : const Color(0xFFF1F4FD),
+      color: selected ? _travelAccent : _travelAccentSoft,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -853,7 +873,7 @@ class _DateChoiceChip extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: selected ? Colors.white : const Color(0xFF19233E),
+              color: selected ? Colors.white : _travelAccentDark,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -879,6 +899,13 @@ class _TripResultTile extends StatelessWidget {
     return '${value.toStringAsFixed(value % 1 == 0 ? 0 : 2)} $currency';
   }
 
+  bool _shouldHidePrice() {
+    final bool isIntermediateDeparture = trip.raw['isIntermediateDeparture'] == true;
+    final bool isIntermediateArrival = trip.raw['isIntermediateArrival'] == true;
+    final double value = trip.pricePerSeat ?? 0;
+    return isIntermediateDeparture && isIntermediateArrival && value == 0;
+  }
+
   String _arrivalTimeLabel() {
     final Map<String, dynamic> raw = trip.raw;
     final List<String> candidates = <String>[
@@ -894,12 +921,12 @@ class _TripResultTile extends StatelessWidget {
 
   String _driverLabel() {
     final String name = (trip.driverName ?? '').trim();
-    return name.isEmpty ? 'Conducteur non renseigne' : name;
+    return name.isEmpty ? 'Conducteur non renseign\u00E9' : name;
   }
 
   String _vehicleLabel() {
     final String vehicle = (trip.raw['vehicleModel'] ?? '').toString().trim();
-    return vehicle.isEmpty ? 'Vehicule non renseigne' : vehicle;
+    return vehicle.isEmpty ? 'V\u00E9hicule non renseign\u00E9' : vehicle;
   }
 
   @override
@@ -911,188 +938,281 @@ class _TripResultTile extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         onTap: onTap,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFE4EAFB)),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _travelSurfaceBorder),
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFFFFFFFF),
+                Color(0xFFF4FFFC),
+                Color(0xFFE8FFFA),
+              ],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: _travelAccent.withOpacity(0.10),
+                blurRadius: 18,
+                offset: const Offset(0, 10),
+              ),
+            ],
           ),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 54,
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.84),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: _travelSurfaceBorder),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Text(
+                                  departureTime,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w900,
+                                    color: Color(0xFF0F1A35),
+                                  ),
+                                ),
+                                Text(
+                                  arrivalTime,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w900,
+                                    color: Color(0xFF0F1A35),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          SizedBox(
+                            width: 18,
+                            child: SizedBox(
+                              height: 60,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: _travelAccent,
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: _travelAccent.withOpacity(0.35),
+                                        blurRadius: 8,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  width: 2,
+                                  height: 24,
+                                  margin: const EdgeInsets.symmetric(vertical: 4),
+                                  decoration: const BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [Color(0xFF7DE6D9), Color(0xFFB7D9D4)],
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF8FB7B1),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SizedBox(
+                                  height: 60,
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        trip.departurePlace,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w800,
+                                          color: Color(0xFF10233E),
+                                        ),
+                                      ),
+                                      Text(
+                                        trip.arrivalPlace,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w800,
+                                          color: Color(0xFF10233E),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    if (!_shouldHidePrice())
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [_travelAccentDark, _travelAccent],
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _travelAccent.withOpacity(0.24),
+                              blurRadius: 14,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            const Text(
+                              'Prix',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _priceLabel(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.68),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: _travelSurfaceBorder),
+                  ),
+                  child: Column(
                     children: [
-                      SizedBox(
-                        width: 54,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              departureTime,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF0F1A35),
-                              ),
-                            ),
-                            const SizedBox(height: 18),
-                            Text(
-                              arrivalTime,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF0F1A35),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(
-                        width: 16,
-                        child: Column(
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF0B5FFF),
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            Container(
-                              width: 2,
-                              height: 20,
-                              color: const Color(0xFFCAD6EE),
-                            ),
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF8FA5CF),
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              trip.departurePlace,
+                      Row(
+                        children: [
+                          const Icon(Icons.person_outline_rounded, size: 16, color: Color(0xFF516186)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _driverLabel(),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 14,
+                                fontSize: 13,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF1A2747),
+                                color: Color(0xFF223253),
                               ),
                             ),
-                            const SizedBox(height: 10),
-                            Text(
-                              trip.arrivalPlace,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(Icons.directions_car_outlined, size: 16, color: Color(0xFF516186)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _vehicleLabel(),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 14,
+                                fontSize: 13,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF1A2747),
+                                color: Color(0xFF223253),
                               ),
                             ),
-                          ],
-                        ),
+                          ),
+                          if (trip.seats != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: _travelAccentSoft,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                '${trip.seats} pl.',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: _travelAccentDark,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEAF0FF),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    _priceLabel(),
-                    style: const TextStyle(
-                      color: Color(0xFF0B5FFF),
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const Divider(height: 1, color: Color(0xFFE4EAFB)),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Icon(Icons.person_outline_rounded, size: 16, color: Color(0xFF516186)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _driverLabel(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF223253),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(Icons.directions_car_outlined, size: 16, color: Color(0xFF516186)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _vehicleLabel(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF223253),
-                    ),
-                  ),
-                ),
-                if (trip.seats != null) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    '${trip.seats} pl.',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF5B6C90),
-                    ),
-                  ),
-                ],
-              ],
-            ),
                 if (trip.trackNum != null && trip.trackNum!.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Text(
-                    'Ref: ${trip.trackNum}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF5B647A),
-                          fontWeight: FontWeight.w600,
-                        ),
+                  Row(
+                    children: [
+                      const Icon(Icons.confirmation_number_outlined, size: 15, color: Color(0xFF6C7C94)),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Ref: ${trip.trackNum}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFF5B647A),
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    ],
                   ),
                 ],
               ],

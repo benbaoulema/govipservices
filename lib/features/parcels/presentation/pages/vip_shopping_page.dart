@@ -9,7 +9,7 @@ class VipShoppingPage extends StatelessWidget {
     return const FeaturePlaceholderPage(
       title: 'VIP Shopping',
       description:
-          'Ecran pour demander un achat assiste avec collecte, validation et livraison.',
+          '\u00C9cran pour demander un achat assist\u00E9 avec collecte, validation et livraison.',
     );
   }
 }

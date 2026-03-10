@@ -35,6 +35,7 @@ class CreateVoyageBookingInput {
     this.requesterUid,
     this.requesterTrackNum,
     this.requesterEmail,
+    this.idempotencyKey,
   });
 
   final String tripId;
@@ -44,6 +45,7 @@ class CreateVoyageBookingInput {
   final String requesterName;
   final String requesterContact;
   final String? requesterEmail;
+  final String? idempotencyKey;
   final String segmentFrom;
   final String segmentTo;
   final int segmentPrice;

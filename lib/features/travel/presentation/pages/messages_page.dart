@@ -9,7 +9,7 @@ class MessagesPage extends StatelessWidget {
     return const FeaturePlaceholderPage(
       title: 'Messages',
       description:
-          'Ecran de messagerie entre conducteurs et passagers autour dun trajet.',
+          '\u00C9cran de messagerie entre conducteurs et passagers autour d\'un trajet.',
     );
   }
 }

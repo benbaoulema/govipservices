@@ -88,7 +88,7 @@ class AccountPage extends StatelessWidget {
                           child: FilledButton.icon(
                             onPressed: () => _logout(context),
                             icon: const Icon(Icons.logout_rounded),
-                            label: const Text('Se deconnecter'),
+                            label: const Text('Se d\u00E9connecter'),
                           ),
                         ),
                       ],

@@ -7,9 +7,9 @@ class ShipPackagePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const FeaturePlaceholderPage(
-      title: 'Expedier',
+      title: 'Exp\u00E9dier',
       description:
-          'Ecran dedie a la creation dun envoi: adresses, colis, prix, paiement et suivi.',
+          '\u00C9cran d\u00E9di\u00E9 \u00E0 la cr\u00E9ation d\'un envoi : adresses, colis, prix, paiement et suivi.',
     );
   }
 }
