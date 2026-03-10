@@ -5,6 +5,8 @@ import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/domain/models/trip_detail_models.dart';
 
+const double _topPanelMaxExtent = 286;
+
 enum HomeMode { travel, parcels }
 
 class HomeMenuItem {
@@ -147,8 +149,10 @@ class _HomePageState extends State<HomePage> {
     final bool isTravel = _activeMode == HomeMode.travel;
     final Color accent = isTravel ? _travelAccent : _parcelAccent;
     final List<HomeMenuItem> items = _activeItems;
+    final double topInset = MediaQuery.paddingOf(context).top + kToolbarHeight + 12;
 
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: const Text('GoVIP Services'),
         actions: [
@@ -162,96 +166,109 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF3F5F8),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Row(
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 260),
+        child: CustomScrollView(
+          key: ValueKey(_activeMode),
+          slivers: [
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(16, topInset, 16, 0),
+              sliver: SliverPersistentHeader(
+                pinned: false,
+                delegate: _TopPanelHeaderDelegate(
+                  minExtentValue: 0,
+                  maxExtentValue: _topPanelMaxExtent,
+                  child: Column(
                     children: [
-                      Expanded(
-                        child: _ModeButton(
-                          label: 'Voyager',
-                          selected: isTravel,
-                          selectedColor: _travelAccent,
-                          onTap: () => _selectMode(HomeMode.travel),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF3F5F8),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: _ModeButton(
+                                  label: 'Voyager',
+                                  selected: isTravel,
+                                  selectedColor: _travelAccent,
+                                  onTap: () => _selectMode(HomeMode.travel),
+                                ),
+                              ),
+                              Expanded(
+                                child: _ModeButton(
+                                  label: 'Colis',
+                                  selected: !isTravel,
+                                  selectedColor: _parcelAccent,
+                                  onTap: () => _selectMode(HomeMode.parcels),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                      Expanded(
-                        child: _ModeButton(
-                          label: 'Colis',
-                          selected: !isTravel,
-                          selectedColor: _parcelAccent,
-                          onTap: () => _selectMode(HomeMode.parcels),
-                        ),
-                      ),
+                      const SizedBox(height: 10),
+                      _HeroPanel(
+                        accent: accent,
+                        title: isTravel ? 'Voyagez en toute confiance' : 'Expediez facilement vos colis',
+                        description: isTravel
+                            ? 'Publiez un trajet, r\u00E9servez rapidement et restez connect\u00E9 avec vos voyageurs.'
+                            : 'Choisissez le service adapt\u00E9 : exp\u00E9dition, shopping VIP ou proposition de transport.',
+                        actionLabel: isTravel ? 'Reserver' : null,
+                        onAction: isTravel ? () => _openItem(_travelItems[1], 1) : null,
+                      )
+                          .animate()
+                          .fadeIn(duration: 320.ms)
+                          .slideY(begin: 0.05, end: 0, curve: Curves.easeOutCubic),
                     ],
                   ),
                 ),
               ),
             ),
-            Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 260),
-                child: ListView(
-                  key: ValueKey(_activeMode),
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-                  children: [
-                    _HeroPanel(
-                      accent: accent,
-                      title: isTravel ? 'Voyagez en toute confiance' : 'Expediez facilement vos colis',
-                      description: isTravel
-                          ? 'Publiez un trajet, r\u00E9servez rapidement et restez connect\u00E9 avec vos voyageurs.'
-                          : 'Choisissez le service adapt\u00E9 : exp\u00E9dition, shopping VIP ou proposition de transport.',
-                    )
-                        .animate()
-                        .fadeIn(duration: 320.ms)
-                        .slideY(begin: 0.08, end: 0, curve: Curves.easeOutCubic),
-                    const SizedBox(height: 14),
-                    if (isTravel) ...[
-                      _FeaturedProTripsSection(
+            const SliverToBoxAdapter(child: SizedBox(height: 14)),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              sliver: SliverToBoxAdapter(
+                child: isTravel
+                    ? _FeaturedProTripsSection(
                         future: _featuredProTripsFuture,
                         accent: accent,
                         onOpenTrip: _openFeaturedTrip,
                       )
                           .animate()
                           .fadeIn(delay: 80.ms, duration: 260.ms)
-                          .slideY(begin: 0.05, end: 0, curve: Curves.easeOutCubic),
-                    ] else ...[
-                      Text(
-                        'Actions principales',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ).animate().fadeIn(delay: 80.ms, duration: 260.ms),
-                      const SizedBox(height: 8),
-                      ...items.asMap().entries.map(
-                        (entry) {
-                          final int index = entry.key;
-                          final HomeMenuItem item = entry.value;
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _ActionTile(
-                              item: item,
-                              accent: accent,
-                              onTap: () => _openItem(item, index),
-                            )
-                                .animate()
-                                .fadeIn(delay: Duration(milliseconds: 120 + (index * 70)), duration: 280.ms)
-                                .slideX(begin: 0.08, end: 0, curve: Curves.easeOutCubic),
-                          );
-                        },
+                          .slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic)
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Actions principales',
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ).animate().fadeIn(delay: 80.ms, duration: 260.ms),
+                          const SizedBox(height: 8),
+                          ...items.asMap().entries.map(
+                            (entry) {
+                              final int index = entry.key;
+                              final HomeMenuItem item = entry.value;
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: _ActionTile(
+                                  item: item,
+                                  accent: accent,
+                                  onTap: () => _openItem(item, index),
+                                )
+                                    .animate()
+                                    .fadeIn(delay: Duration(milliseconds: 120 + (index * 70)), duration: 280.ms)
+                                    .slideX(begin: 0.08, end: 0, curve: Curves.easeOutCubic),
+                              );
+                            },
+                          ),
+                        ],
                       ),
-                    ],
-                  ],
-                ),
               ),
             ),
           ],
@@ -316,16 +333,73 @@ class _ModeButton extends StatelessWidget {
   }
 }
 
+class _TopPanelHeaderDelegate extends SliverPersistentHeaderDelegate {
+  const _TopPanelHeaderDelegate({
+    required this.minExtentValue,
+    required this.maxExtentValue,
+    required this.child,
+  });
+
+  final double minExtentValue;
+  final double maxExtentValue;
+  final Widget child;
+
+  @override
+  double get minExtent => minExtentValue;
+
+  @override
+  double get maxExtent => maxExtentValue;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final double progress = (shrinkOffset / (maxExtentValue == 0 ? 1 : maxExtentValue)).clamp(0, 1);
+    final double eased = Curves.easeOutCubic.transform(progress);
+    final double opacity = 1 - eased;
+    final double translateY = -10 * eased;
+
+    return SizedBox.expand(
+      child: ClipRect(
+        child: OverflowBox(
+          alignment: Alignment.topCenter,
+          minHeight: 0,
+          maxHeight: maxExtentValue,
+          child: Opacity(
+            opacity: opacity,
+            child: Transform.translate(
+              offset: Offset(0, translateY),
+              child: SizedBox(
+                height: maxExtentValue,
+                child: child,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _TopPanelHeaderDelegate oldDelegate) {
+    return oldDelegate.minExtentValue != minExtentValue ||
+        oldDelegate.maxExtentValue != maxExtentValue ||
+        oldDelegate.child != child;
+  }
+}
+
 class _HeroPanel extends StatelessWidget {
   const _HeroPanel({
     required this.accent,
     required this.title,
     required this.description,
+    this.actionLabel,
+    this.onAction,
   });
 
   final Color accent;
   final String title;
   final String description;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -338,28 +412,179 @@ class _HeroPanel extends StatelessWidget {
           colors: [accent, Color.lerp(accent, Colors.black, 0.18)!],
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Stack(
           children: [
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
+            const Positioned(
+              top: -24,
+              right: -10,
+              child: _LiquidOrb(
+                size: 124,
+                color: Color(0x30FFFFFF),
+                beginOffset: Offset.zero,
+                endOffset: Offset(-10, 16),
+                durationMs: 4800,
               ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              description,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Colors.white.withOpacity(0.92),
+            const Positioned(
+              bottom: -26,
+              left: -12,
+              child: _LiquidOrb(
+                size: 140,
+                color: Color(0x1EFFFFFF),
+                beginOffset: Offset.zero,
+                endOffset: Offset(14, -14),
+                durationMs: 5600,
+              ),
+            ),
+            const Positioned(
+              top: 74,
+              right: 48,
+              child: _LiquidOrb(
+                size: 38,
+                color: Color(0x26FFFFFF),
+                beginOffset: Offset.zero,
+                endOffset: Offset(-6, 8),
+                durationMs: 3400,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    description,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Colors.white.withOpacity(0.92),
+                    ),
+                  ),
+                  if (actionLabel != null && onAction != null) ...[
+                    const SizedBox(height: 16),
+                    _HeroActionButton(
+                      label: actionLabel!,
+                      onTap: onAction!,
+                    ),
+                  ],
+                ],
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _LiquidOrb extends StatelessWidget {
+  const _LiquidOrb({
+    required this.size,
+    required this.color,
+    required this.beginOffset,
+    required this.endOffset,
+    required this.durationMs,
+  });
+
+  final double size;
+  final Color color;
+  final Offset beginOffset;
+  final Offset endOffset;
+  final int durationMs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+      ),
+    )
+        .animate(onPlay: (controller) => controller.repeat(reverse: true))
+        .move(
+          begin: beginOffset,
+          end: endOffset,
+          duration: Duration(milliseconds: durationMs),
+          curve: Curves.easeInOutSine,
+        )
+        .scaleXY(
+          begin: 0.98,
+          end: 1.03,
+          duration: Duration(milliseconds: durationMs + 700),
+          curve: Curves.easeInOut,
+        );
+  }
+}
+
+class _HeroActionButton extends StatelessWidget {
+  const _HeroActionButton({
+    required this.label,
+    required this.onTap,
+  });
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.center,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onTap,
+          child: Ink(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(999),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.10),
+                  blurRadius: 14,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.event_seat_rounded,
+                  size: 18,
+                  color: Color(0xFF0F766E),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Color(0xFF0F766E),
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      )
+          .animate(onPlay: (controller) => controller.repeat(period: const Duration(milliseconds: 2800)))
+          .shimmer(
+            duration: 1200.ms,
+            delay: 1400.ms,
+            color: Colors.white.withOpacity(0.72),
+          ),
     );
   }
 }
@@ -567,7 +792,7 @@ class _FeaturedTripsLoading extends StatelessWidget {
   }
 }
 
-class _FeaturedTripCard extends StatelessWidget {
+class _FeaturedTripCard extends StatefulWidget {
   const _FeaturedTripCard({
     required this.trip,
     required this.accent,
@@ -578,9 +803,16 @@ class _FeaturedTripCard extends StatelessWidget {
   final Color accent;
   final VoidCallback onTap;
 
+  @override
+  State<_FeaturedTripCard> createState() => _FeaturedTripCardState();
+}
+
+class _FeaturedTripCardState extends State<_FeaturedTripCard> {
+  double _dragOffset = 0;
+
   String get _priceLabel {
-    final double? price = trip.pricePerSeat;
-    final String currency = trip.currency ?? 'XOF';
+    final double? price = widget.trip.pricePerSeat;
+    final String currency = widget.trip.currency ?? 'XOF';
     if (price == null) return currency;
     final bool whole = price == price.roundToDouble();
     final String amount = whole ? price.toInt().toString() : price.toStringAsFixed(0);
@@ -588,7 +820,7 @@ class _FeaturedTripCard extends StatelessWidget {
   }
 
   String? get _vehiclePhotoUrl {
-    final Object? value = trip.raw['vehiclePhotoUrl'];
+    final Object? value = widget.trip.raw['vehiclePhotoUrl'];
     if (value is! String) return null;
     final String url = value.trim();
     return url.isEmpty ? null : url;
@@ -596,202 +828,231 @@ class _FeaturedTripCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String driver = (trip.driverName?.trim().isNotEmpty ?? false) ? trip.driverName!.trim() : 'Transporteur verifie';
-    final String schedule = trip.departureTime?.trim().isNotEmpty == true ? trip.departureTime!.trim() : 'Horaire confirme apres validation';
-    final int seats = trip.seats ?? 0;
+    final String driver = (widget.trip.driverName?.trim().isNotEmpty ?? false)
+        ? widget.trip.driverName!.trim()
+                        : 'Transporteur vérifié';
+    final String schedule = widget.trip.departureTime?.trim().isNotEmpty == true
+        ? widget.trip.departureTime!.trim()
+        : 'Horaire confirmé après validation';
+    final int seats = widget.trip.seats ?? 0;
     final String? vehiclePhotoUrl = _vehiclePhotoUrl;
+    final double horizontalShift = _dragOffset.clamp(-18, 18);
+    final double rotation = horizontalShift / 640;
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(28),
-        onTap: onTap,
-        child: Ink(
-          decoration: BoxDecoration(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      transform: Matrix4.identity()
+        ..translate(horizontalShift, horizontalShift.abs() * 0.08)
+        ..rotateZ(rotation),
+      child: Material(
+        color: Colors.transparent,
+        child: GestureDetector(
+          onHorizontalDragUpdate: (details) {
+            setState(() {
+              _dragOffset += details.delta.dx * 0.45;
+            });
+          },
+          onHorizontalDragCancel: () => setState(() => _dragOffset = 0),
+          onHorizontalDragEnd: (_) => setState(() => _dragOffset = 0),
+          child: InkWell(
             borderRadius: BorderRadius.circular(28),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                const Color(0xFFF8FFFE),
-                Color.lerp(accent, Colors.white, 0.82)!,
-                Color.lerp(accent, const Color(0xFFE6FFFB), 0.45)!,
-              ],
-            ),
-            border: Border.all(color: const Color(0xFFD2F5EF)),
-            boxShadow: [
-              BoxShadow(
-                color: accent.withOpacity(0.16),
-                blurRadius: 22,
-                offset: const Offset(0, 12),
-              ),
-            ],
-          ),
-          child: SizedBox(
-            height: 214,
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: accent.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          driver,
-                          style: TextStyle(
-                            color: accent,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        _priceLabel,
-                        style: TextStyle(
-                          color: accent,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
+            onTap: widget.onTap,
+            child: Ink(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(28),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    const Color(0xFFF8FFFE),
+                    Color.lerp(widget.accent, Colors.white, 0.82)!,
+                    Color.lerp(widget.accent, const Color(0xFFE6FFFB), 0.45)!,
+                  ],
+                ),
+                border: Border.all(color: const Color(0xFFD2F5EF)),
+                boxShadow: [
+                  BoxShadow(
+                    color: widget.accent.withOpacity(0.16),
+                    blurRadius: 22,
+                    offset: const Offset(0, 12),
                   ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                trip.departurePlace,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Color(0xFF111827),
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w800,
-                                ),
+                ],
+              ),
+              child: SizedBox(
+                height: 214,
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: widget.accent.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              driver,
+                              style: TextStyle(
+                                color: widget.accent,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
                               ),
-                              const SizedBox(height: 2),
-                              Row(
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            _priceLabel,
+                            style: TextStyle(
+                              color: widget.accent,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Container(
-                                    width: 20,
-                                    height: 20,
-                                    decoration: BoxDecoration(
-                                      color: accent,
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: accent.withOpacity(0.28),
-                                          blurRadius: 10,
-                                        ),
-                                      ],
+                                  Text(
+                                    widget.trip.departurePlace,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Color(0xFF111827),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800,
                                     ),
-                                    child: const Icon(Icons.arrow_downward_rounded, color: Colors.white, size: 12),
                                   ),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Container(
-                                      height: 2,
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(99),
-                                        gradient: LinearGradient(
-                                          colors: [
-                                            accent.withOpacity(0.9),
-                                            accent.withOpacity(0.18),
+                                  const SizedBox(height: 2),
+                                  Row(
+                                    children: [
+                                      Container(
+                                        width: 20,
+                                        height: 20,
+                                        decoration: BoxDecoration(
+                                          color: widget.accent,
+                                          shape: BoxShape.circle,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: widget.accent.withOpacity(0.28),
+                                              blurRadius: 10,
+                                            ),
                                           ],
                                         ),
+                                        child: const Icon(Icons.arrow_downward_rounded, color: Colors.white, size: 12),
                                       ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Container(
+                                          height: 2,
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(99),
+                                            gradient: LinearGradient(
+                                              colors: [
+                                                widget.accent.withOpacity(0.9),
+                                                widget.accent.withOpacity(0.18),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    widget.trip.arrivalPlace,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Color(0xFF374151),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Text(
+                                    '$schedule  •  $seats place${seats > 1 ? 's' : ''}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Color(0xFF5B6472),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                trip.arrivalPlace,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Color(0xFF374151),
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const Spacer(),
-                              Text(
-                                '$schedule  •  $seats place${seats > 1 ? 's' : ''}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Color(0xFF5B6472),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
+                            ),
+                            if (vehiclePhotoUrl != null) ...[
+                              const SizedBox(width: 14),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(20),
+                                child: SizedBox(
+                                  width: 96,
+                                  child: Image.network(
+                                    vehiclePhotoUrl,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => _FeaturedTripPhotoFallback(accent: widget.accent),
+                                    loadingBuilder: (context, child, progress) {
+                                      if (progress == null) return child;
+                                      return _FeaturedTripPhotoFallback(accent: widget.accent);
+                                    },
+                                  ),
                                 ),
                               ),
                             ],
-                          ),
+                          ],
                         ),
-                        if (vehiclePhotoUrl != null) ...[
-                          const SizedBox(width: 14),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(20),
-                            child: SizedBox(
-                              width: 96,
-                              child: Image.network(
-                                vehiclePhotoUrl,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => _FeaturedTripPhotoFallback(accent: accent),
-                                loadingBuilder: (context, child, progress) {
-                                  if (progress == null) return child;
-                                  return _FeaturedTripPhotoFallback(accent: accent);
-                                },
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.badge_outlined,
+                            size: 14,
+                            color: Color(0xFF5B6472),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              driver,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFF4B5563),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                           ),
                         ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.badge_outlined,
-                        size: 14,
-                        color: Color(0xFF5B6472),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          driver,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Color(0xFF4B5563),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
         ),
       ),
-    );
+    )
+        .animate(onPlay: (controller) => controller.repeat(reverse: true))
+        .moveY(
+          begin: 0,
+          end: -4,
+          duration: const Duration(milliseconds: 2400),
+          curve: Curves.easeInOutSine,
+        );
   }
 }
 

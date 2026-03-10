@@ -44,6 +44,18 @@ class GoVipApp extends StatelessWidget {
           indicatorColor: _turquoiseDark,
           surfaceTintColor: Colors.transparent,
         ),
+        snackBarTheme: SnackBarThemeData(
+          backgroundColor: _turquoiseDark,
+          contentTextStyle: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+          actionTextColor: const Color(0xFFD9FFFA),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
         useMaterial3: true,
       ),
       locale: const Locale('fr', 'FR'),

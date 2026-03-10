@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:govipservices/app/presentation/home_page.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -39,11 +40,7 @@ class _IntroGatePageState extends State<IntroGatePage> {
         }
 
         if (snapshot.data == true) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            Navigator.of(context).pushReplacementNamed(AppRoutes.home);
-          });
-          return const SizedBox.shrink();
+          return const HomePage();
         }
 
         return const IntroPage();

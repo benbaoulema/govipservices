@@ -87,21 +87,101 @@ class TripDetailView extends StatelessWidget {
       backgroundColor: _travelAccent,
       appBar: const TripDetailAppBar(),
       body: SafeArea(
-        child: switch (state.status) {
-          TripDetailStatus.initial || TripDetailStatus.loading => const TripLoadingSkeleton(),
-          TripDetailStatus.error => TripErrorStateWidget(
-              message: state.errorMessage ?? 'Erreur inconnue.',
-              onRetry: cubit.load,
-              actionLabel: 'R\u00E9essayer',
+        child: Stack(
+          children: [
+            const Positioned(
+              top: -36,
+              right: -18,
+              child: _DetailLiquidOrb(
+                size: 148,
+                color: Color(0x26FFFFFF),
+                beginOffset: Offset.zero,
+                endOffset: Offset(-14, 18),
+                durationMs: 5200,
+              ),
             ),
-          TripDetailStatus.invalidSegment => TripErrorStateWidget(
-              message: state.errorMessage ?? 'Segment invalide.',
-              onRetry: () => Navigator.of(context).pop(),
-              actionLabel: 'Retour',
+            const Positioned(
+              top: 220,
+              left: -34,
+              child: _DetailLiquidOrb(
+                size: 126,
+                color: Color(0x1AFFFFFF),
+                beginOffset: Offset.zero,
+                endOffset: Offset(16, -14),
+                durationMs: 6100,
+              ),
             ),
-          TripDetailStatus.success => _SuccessBody(cubit: cubit),
-        },
+            const Positioned(
+              bottom: 120,
+              right: -24,
+              child: _DetailLiquidOrb(
+                size: 118,
+                color: Color(0x16FFFFFF),
+                beginOffset: Offset.zero,
+                endOffset: Offset(-10, -12),
+                durationMs: 5600,
+              ),
+            ),
+            switch (state.status) {
+              TripDetailStatus.initial || TripDetailStatus.loading => const TripLoadingSkeleton(),
+              TripDetailStatus.error => TripErrorStateWidget(
+                  message: state.errorMessage ?? 'Erreur inconnue.',
+                  onRetry: cubit.load,
+                  actionLabel: 'R\u00E9essayer',
+                ),
+              TripDetailStatus.invalidSegment => TripErrorStateWidget(
+                  message: state.errorMessage ?? 'Segment invalide.',
+                  onRetry: () => Navigator.of(context).pop(),
+                  actionLabel: 'Retour',
+                ),
+              TripDetailStatus.success => _SuccessBody(cubit: cubit),
+            },
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _DetailLiquidOrb extends StatelessWidget {
+  const _DetailLiquidOrb({
+    required this.size,
+    required this.color,
+    required this.beginOffset,
+    required this.endOffset,
+    required this.durationMs,
+  });
+
+  final double size;
+  final Color color;
+  final Offset beginOffset;
+  final Offset endOffset;
+  final int durationMs;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+        ),
+      )
+          .animate(onPlay: (controller) => controller.repeat(reverse: true))
+          .move(
+            begin: beginOffset,
+            end: endOffset,
+            duration: Duration(milliseconds: durationMs),
+            curve: Curves.easeInOutSine,
+          )
+          .scaleXY(
+            begin: 0.98,
+            end: 1.03,
+            duration: Duration(milliseconds: durationMs + 700),
+            curve: Curves.easeInOut,
+          ),
     );
   }
 }
@@ -165,7 +245,7 @@ class _SuccessBody extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Choisir un autre depart',
+                  'Choisir un autre départ',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
@@ -173,7 +253,7 @@ class _SuccessBody extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Selectionnez un point de montee intermediaire.',
+                  'Sélectionnez un point de montée intermédiaire.',
                   style: TextStyle(
                     color: Color(0xFF5B647A),
                   ),
@@ -233,7 +313,7 @@ class _SuccessBody extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Choisir une autre arrivee',
+                  'Choisir une autre arrivée',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
@@ -241,7 +321,7 @@ class _SuccessBody extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Selectionnez un point de descente intermediaire.',
+                  'Sélectionnez un point de descente intermédiaire.',
                   style: TextStyle(
                     color: Color(0xFF5B647A),
                   ),
@@ -1011,26 +1091,119 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _DialogInfoChip(
-                              icon: Icons.event_seat_outlined,
-                              label: '${widget.selectedSeats} place(s)',
-                            ),
-                            if (!widget.hidePrice)
-                              _DialogInfoChip(
-                                icon: Icons.payments_outlined,
-                                label: '${widget.totalFare} ${widget.trip.currency}',
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: Colors.white.withOpacity(0.14)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Résumé',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white70,
+                                ),
                               ),
-                          ],
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.14),
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            width: 34,
+                                            height: 34,
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withOpacity(0.14),
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                            child: const Icon(
+                                              Icons.airline_seat_recline_normal_rounded,
+                                              size: 18,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          const Expanded(
+                                            child: Text(
+                                              'Places',
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w800,
+                                                color: Colors.white70,
+                                              ),
+                                            ),
+                                          ),
+                                          Text(
+                                            '${widget.selectedSeats}',
+                                            style: const TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w900,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  if (!widget.hidePrice) ...[
+                                    const SizedBox(width: 10),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.18),
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'Total',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w800,
+                                              color: Colors.white70,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '${widget.totalFare} ${widget.trip.currency}',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w900,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ],
                   ),
-                ),
+                ).animate().fadeIn(duration: 260.ms).slideY(begin: -0.03, end: 0),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -1046,17 +1219,38 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
                           width: double.infinity,
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: _travelAccentSoft,
-                            borderRadius: BorderRadius.circular(16),
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: _travelSurfaceBorder),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x120F766E),
+                                blurRadius: 20,
+                                offset: Offset(0, 8),
+                              ),
+                            ],
                           ),
                           child: Row(
                             children: [
+                              Container(
+                                width: 38,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  color: _travelAccentSoft,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(
+                                  Icons.person_outline_rounded,
+                                  color: _travelAccentDark,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
                               const Expanded(
                                 child: Text(
                                   'Connectez-vous pour pré-remplir vos informations.',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: FontWeight.w700,
                                     color: Color(0xFF315A58),
                                   ),
                                 ),
@@ -1066,6 +1260,12 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
                                 canRequestFocus: false,
                                 skipTraversal: true,
                                 child: TextButton(
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: _travelAccentDark,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
                                   onPressed: _isSubmitting
                                       ? null
                                       : () {
@@ -1077,14 +1277,33 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
                               ),
                             ],
                           ),
-                        ),
+                        ).animate().fadeIn(duration: 260.ms, delay: 40.ms).slideY(begin: 0.04, end: 0),
                       if (!widget.isLoggedIn) const SizedBox(height: 12),
-                      const Text(
-                        'Informations voyageurs',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 15,
-                          color: Color(0xFF10233E),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: _travelSurfaceBorder),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(
+                              Icons.badge_outlined,
+                              size: 18,
+                              color: _travelAccentDark,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'Informations voyageurs',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
+                                color: Color(0xFF10233E),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -1095,21 +1314,49 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
                             bottom: index == widget.passengerNameControllers.length - 1 ? 0 : 12,
                           ),
                           child: Container(
-                            padding: const EdgeInsets.all(12),
+                            padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF9FFFE),
-                              borderRadius: BorderRadius.circular(18),
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
                               border: Border.all(color: _travelSurfaceBorder),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x120F766E),
+                                  blurRadius: 22,
+                                  offset: Offset(0, 10),
+                                ),
+                              ],
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Passager ${index + 1}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    color: Color(0xFF10233E),
-                                  ),
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 34,
+                                      height: 34,
+                                      decoration: BoxDecoration(
+                                        color: _travelAccentSoft,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      alignment: Alignment.center,
+                                      child: Text(
+                                        '${index + 1}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w900,
+                                          color: _travelAccentDark,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      'Passager ${index + 1}',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF10233E),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 const SizedBox(height: 10),
                                 TextField(
@@ -1124,7 +1371,7 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
                                     hintText: 'Entrez le nom du passager',
                                     isDense: true,
                                     filled: true,
-                                    fillColor: Colors.white,
+                                    fillColor: const Color(0xFFF9FFFE),
                                     prefixIcon: const Icon(Icons.person_outline_rounded),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(14),
@@ -1164,7 +1411,7 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
                                     hintText: 'Numéro du passager',
                                     isDense: true,
                                     filled: true,
-                                    fillColor: Colors.white,
+                                    fillColor: const Color(0xFFF9FFFE),
                                     prefixIcon: const Icon(Icons.phone_outlined),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(14),
@@ -1182,7 +1429,10 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
                                 ),
                               ],
                             ),
-                          ),
+                          ).animate().fadeIn(
+                            duration: 240.ms,
+                            delay: Duration(milliseconds: 80 + (index * 45)),
+                          ).slideY(begin: 0.04, end: 0),
                         ),
                       ),
                       if (_errorText != null) ...[
@@ -1214,7 +1464,7 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
         child: Container(
           padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + MediaQuery.viewInsetsOf(context).bottom),
           decoration: const BoxDecoration(
-            color: Colors.white,
+            color: Color(0xFFF9FFFE),
             border: Border(top: BorderSide(color: _travelSurfaceBorder)),
           ),
           child: Column(
@@ -1254,86 +1504,64 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
                 ),
               ],
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: Focus(
-                      canRequestFocus: false,
-                      skipTraversal: true,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          side: const BorderSide(color: _travelSurfaceBorder),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _travelSurfaceBorder),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x140F766E),
+                      blurRadius: 24,
+                      offset: Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Focus(
+                        canRequestFocus: false,
+                        skipTraversal: true,
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            side: const BorderSide(color: _travelSurfaceBorder),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          onPressed: _isSubmitting
+                              ? null
+                              : () {
+                                  _dismissKeyboard();
+                                  Navigator.of(context).pop();
+                                },
+                          child: const Text('Annuler'),
                         ),
-                        onPressed: _isSubmitting
-                            ? null
-                            : () {
-                                _dismissKeyboard();
-                                Navigator.of(context).pop();
-                              },
-                        child: const Text('Annuler'),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Focus(
-                      canRequestFocus: false,
-                      skipTraversal: true,
-                      child: FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: _travelAccent,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Focus(
+                        canRequestFocus: false,
+                        skipTraversal: true,
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _travelAccent,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          onPressed: _isSubmitting ? null : _submit,
+                          child: Text(_isSubmitting ? 'Traitement...' : 'Confirmer'),
                         ),
-                        onPressed: _isSubmitting ? null : _submit,
-                        child: Text(_isSubmitting ? 'Traitement...' : 'Confirmer'),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _DialogInfoChip extends StatelessWidget {
-  const _DialogInfoChip({
-    required this.icon,
-    required this.label,
-  });
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.16),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withOpacity(0.18)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: Colors.white),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -1484,7 +1712,7 @@ class _IntermediateStopOption extends StatelessWidget {
                     if (node.time.trim().isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Text(
-                        'Heure estimee: ${node.time}',
+                        'Heure estimée : ${node.time}',
                         style: const TextStyle(
                           fontSize: 12,
                           color: Color(0xFF5B647A),
@@ -1594,7 +1822,7 @@ class TripTimelineWidget extends StatelessWidget {
                         OutlinedButton.icon(
                           onPressed: onOpenAlternativeDepartures,
                           icon: const Icon(Icons.alt_route_rounded, size: 16),
-                          label: const Text('Changer depart'),
+                          label: const Text('Changer départ'),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: _travelAccentDark,
                             side: const BorderSide(color: _travelSurfaceBorder),
@@ -1622,7 +1850,7 @@ class TripTimelineWidget extends StatelessWidget {
                         OutlinedButton.icon(
                           onPressed: onOpenAlternativeArrivals,
                           icon: const Icon(Icons.location_on_outlined, size: 16),
-                          label: const Text('Changer arrivee'),
+                          label: const Text('Changer arrivée'),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: _travelAccentDark,
                             side: const BorderSide(color: _travelSurfaceBorder),
@@ -1850,15 +2078,64 @@ class TripBookingPanel extends StatelessWidget {
         children: [
           const Text('R\u00E9servation', style: TextStyle(fontWeight: FontWeight.w800)),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              IconButton(onPressed: canDec ? onDecrement : null, icon: const Icon(Icons.remove_circle_outline)),
-              Text('$selectedSeats', style: const TextStyle(fontWeight: FontWeight.w800)),
-              IconButton(onPressed: canInc ? onIncrement : null, icon: const Icon(Icons.add_circle_outline)),
-              const Spacer(),
-              if (!hidePrice)
-                Text('$total $currency', style: const TextStyle(fontWeight: FontWeight.w800, color: _travelAccentDark)),
-            ],
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FFFD),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: _travelSurfaceBorder),
+            ),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Places',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF5B647A),
+                    ),
+                  ),
+                ),
+                _SeatAdjustButton(
+                  icon: Icons.remove_rounded,
+                  onTap: canDec ? onDecrement : null,
+                ),
+                Container(
+                  width: 48,
+                  alignment: Alignment.center,
+                  child: Text(
+                    '$selectedSeats',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFF10233E),
+                    ),
+                  ),
+                ),
+                _SeatAdjustButton(
+                  icon: Icons.add_rounded,
+                  onTap: canInc ? onIncrement : null,
+                ),
+                if (!hidePrice) ...[
+                  const SizedBox(width: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _travelAccentSoft,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      '$total $currency',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: _travelAccentDark,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
           const SizedBox(height: 8),
           SizedBox(
@@ -1869,6 +2146,38 @@ class TripBookingPanel extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SeatAdjustButton extends StatelessWidget {
+  const _SeatAdjustButton({
+    required this.icon,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool enabled = onTap != null;
+
+    return Material(
+      color: enabled ? _travelAccentSoft : const Color(0xFFF1F5F9),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: Icon(
+            icon,
+            color: enabled ? _travelAccentDark : const Color(0xFF9AA7B8),
+          ),
+        ),
       ),
     );
   }
