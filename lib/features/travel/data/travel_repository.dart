@@ -88,6 +88,7 @@ class TravelRepository implements TravelService {
       id: tripRef.id,
       trackNum: trackNum,
       wasCreated: true,
+      alertCount: 0,
     );
   }
 
@@ -220,6 +221,258 @@ class TravelRepository implements TravelService {
     });
 
     return trips.take(limit).toList(growable: false);
+  }
+
+  Future<List<TripSearchResult>> fetchTripsByOwnerUid(String ownerUid, {int limit = 50}) async {
+    final String normalizedUid = ownerUid.trim();
+    if (normalizedUid.isEmpty) return const <TripSearchResult>[];
+
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _firestore
+        .collection('voyageTrips')
+        .where('ownerUid', isEqualTo: normalizedUid)
+        .limit(limit)
+        .get();
+
+    final List<TripSearchResult> trips = snapshot.docs
+        .map(_tripFromDoc)
+        .whereType<TripSearchResult>()
+        .toList(growable: false);
+
+    trips.sort((a, b) {
+      final String ad = a.departureDate;
+      final String bd = b.departureDate;
+      final int dateCompare = bd.compareTo(ad);
+      if (dateCompare != 0) return dateCompare;
+      final String at = a.departureTime ?? '00:00';
+      final String bt = b.departureTime ?? '00:00';
+      return bt.compareTo(at);
+    });
+
+    return trips;
+  }
+
+  Future<TripSearchResult?> findTripByTrackNum(String trackNum) async {
+    final String normalizedTrackNum = trackNum.trim();
+    if (normalizedTrackNum.isEmpty) return null;
+
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _firestore
+        .collection('voyageTrips')
+        .where('trackNum', isEqualTo: normalizedTrackNum)
+        .limit(1)
+        .get();
+
+    if (snapshot.docs.isEmpty) return null;
+    return _tripFromDoc(snapshot.docs.first);
+  }
+
+  Future<Map<String, dynamic>?> getTripRawById(String tripId) async {
+    final String normalizedTripId = tripId.trim();
+    if (normalizedTripId.isEmpty) return null;
+
+    final DocumentSnapshot<Map<String, dynamic>> snapshot =
+        await _firestore.collection('voyageTrips').doc(normalizedTripId).get();
+    final Map<String, dynamic>? data = snapshot.data();
+    if (!snapshot.exists || data == null) return null;
+    return Map<String, dynamic>.from(data);
+  }
+
+  Future<PublishedTripResult> updateTrip(
+    String tripId,
+    Map<String, dynamic> payload,
+  ) async {
+    final String normalizedTripId = tripId.trim();
+    if (normalizedTripId.isEmpty) {
+      throw ArgumentError('tripId must not be empty');
+    }
+
+    final DocumentReference<Map<String, dynamic>> tripRef =
+        _firestore.collection('voyageTrips').doc(normalizedTripId);
+    final DocumentSnapshot<Map<String, dynamic>> existingSnapshot = await tripRef.get();
+    final Map<String, dynamic> existing = existingSnapshot.data() ?? <String, dynamic>{};
+    final String trackNum =
+        (existing['trackNum'] as String?)?.trim().isNotEmpty == true
+            ? (existing['trackNum'] as String).trim()
+            : generateVoyageTrackNum();
+    final Timestamp? createdAt = existing['createdAt'] as Timestamp?;
+    final List<String> changedFields = _detectSensitiveTripChanges(
+      before: existing,
+      after: payload,
+    );
+
+    await tripRef.set(
+      <String, dynamic>{
+        ...payload,
+        'dedupeKey': _buildDedupeKey(payload),
+        'trackNum': trackNum,
+        'createdAt': createdAt ?? FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+
+    final int alertCount = changedFields.isEmpty
+        ? 0
+        : await _createTripUpdateAlerts(
+            tripId: normalizedTripId,
+            tripTrackNum: trackNum,
+            existingTrip: existing,
+            updatedPayload: payload,
+            changedFields: changedFields,
+          );
+
+    return PublishedTripResult(
+      id: normalizedTripId,
+      trackNum: trackNum,
+      wasCreated: false,
+      alertCount: alertCount,
+    );
+  }
+
+  List<String> _detectSensitiveTripChanges({
+    required Map<String, dynamic> before,
+    required Map<String, dynamic> after,
+  }) {
+    final List<String> changed = <String>[];
+
+    void compareStringField(String key) {
+      if (_normalizeScalar(before[key]) != _normalizeScalar(after[key])) {
+        changed.add(key);
+      }
+    }
+
+    void compareNumericField(String key) {
+      if (_normalizeScalar(before[key]) != _normalizeScalar(after[key])) {
+        changed.add(key);
+      }
+    }
+
+    compareStringField('departurePlace');
+    compareStringField('arrivalPlace');
+    compareStringField('departureDate');
+    compareStringField('departureTime');
+    compareNumericField('pricePerSeat');
+    compareNumericField('seats');
+    compareStringField('vehicleModel');
+    compareStringField('contactPhone');
+    compareStringField('driverName');
+
+    final String beforeStops = _normalizeStops(before['intermediateStops']);
+    final String afterStops = _normalizeStops(after['intermediateStops']);
+    if (beforeStops != afterStops) {
+      changed.add('intermediateStops');
+    }
+
+    return changed;
+  }
+
+  Future<int> _createTripUpdateAlerts({
+    required String tripId,
+    required String tripTrackNum,
+    required Map<String, dynamic> existingTrip,
+    required Map<String, dynamic> updatedPayload,
+    required List<String> changedFields,
+  }) async {
+    final QuerySnapshot<Map<String, dynamic>> bookingsSnapshot = await _firestore
+        .collection('voyageBookings')
+        .where('tripId', isEqualTo: tripId)
+        .get();
+
+    if (bookingsSnapshot.docs.isEmpty) return 0;
+
+    final CollectionReference<Map<String, dynamic>> alertsRef =
+        _firestore.collection('voyageTripAlerts');
+    final Map<String, dynamic> oldValues = _extractAlertValues(existingTrip, changedFields);
+    final Map<String, dynamic> newValues = _extractAlertValues(updatedPayload, changedFields);
+    final String message =
+        'Le trajet $tripTrackNum a été modifié. Des réservations liées sont potentiellement impactées.';
+
+    final WriteBatch batch = _firestore.batch();
+    int count = 0;
+    for (final QueryDocumentSnapshot<Map<String, dynamic>> bookingDoc in bookingsSnapshot.docs) {
+      final Map<String, dynamic> booking = bookingDoc.data();
+      final DocumentReference<Map<String, dynamic>> alertRef = alertsRef.doc();
+      batch.set(alertRef, <String, dynamic>{
+        'type': 'trip_updated',
+        'status': 'pending',
+        'message': message,
+        'tripId': tripId,
+        'tripTrackNum': tripTrackNum,
+        'tripOwnerUid': _safeString(updatedPayload['ownerUid']).isEmpty
+            ? _safeString(existingTrip['ownerUid'])
+            : _safeString(updatedPayload['ownerUid']),
+        'bookingId': bookingDoc.id,
+        'bookingTrackNum': _safeString(booking['trackNum']),
+        'bookingStatus': _safeString(booking['status']).isEmpty
+            ? 'pending'
+            : _safeString(booking['status']),
+        'requesterUid': _safeString(booking['requesterUid']),
+        'requesterName': _safeString(booking['requesterName']),
+        'requesterContact': _safeString(booking['requesterContact']),
+        'changedFields': changedFields,
+        'oldValues': oldValues,
+        'newValues': newValues,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      count++;
+    }
+
+    await batch.commit();
+    return count;
+  }
+
+  Map<String, dynamic> _extractAlertValues(
+    Map<String, dynamic> source,
+    List<String> fields,
+  ) {
+    final Map<String, dynamic> values = <String, dynamic>{};
+    for (final String field in fields) {
+      if (field == 'intermediateStops') {
+        values[field] = (source[field] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map>()
+            .map((entry) => Map<String, dynamic>.from(entry))
+            .toList(growable: false);
+      } else {
+        values[field] = source[field];
+      }
+    }
+    return values;
+  }
+
+  String _normalizeStops(Object? raw) {
+    final List<Map<String, dynamic>> stops = (raw as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .map(
+          (stop) => <String, dynamic>{
+            'address': _safeString(stop['address']),
+            'estimatedTime': _safeString(stop['estimatedTime']),
+            'priceFromDeparture': _normalizeScalar(stop['priceFromDeparture']),
+            'selected': stop['selected'] != false,
+          },
+        )
+        .toList(growable: false);
+    return jsonEncode(stops);
+  }
+
+  String _normalizeScalar(Object? value) {
+    if (value == null) return '';
+    if (value is num) return value.toString();
+    if (value is bool) return value ? 'true' : 'false';
+    return value.toString().trim();
+  }
+
+  Future<void> cancelTripById(String tripId) async {
+    final String normalizedTripId = tripId.trim();
+    if (normalizedTripId.isEmpty) return;
+
+    await _firestore.collection('voyageTrips').doc(normalizedTripId).set(
+      <String, dynamic>{
+        'status': 'cancelled',
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
   }
 
   Future<String?> _computeIntermediateSegmentArrivalTime({

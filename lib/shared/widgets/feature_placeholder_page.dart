@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
 class FeaturePlaceholderPage extends StatelessWidget {
   const FeaturePlaceholderPage({
@@ -13,7 +14,10 @@ class FeaturePlaceholderPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(
+        leading: const HomeAppBarButton(),
+        title: Text(title),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

@@ -97,6 +97,143 @@ class VoyageBookingService {
     return VoyageBookingDocument.fromMap(bookingRef.id, merged);
   }
 
+  Future<List<VoyageBookingDocument>> fetchBookingsByTripId(String tripId) async {
+    final String normalizedTripId = tripId.trim();
+    if (normalizedTripId.isEmpty) return const <VoyageBookingDocument>[];
+
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _firestore
+        .collection('voyageBookings')
+        .where('tripId', isEqualTo: normalizedTripId)
+        .get();
+
+    final List<VoyageBookingDocument> bookings = snapshot.docs
+        .map((doc) => VoyageBookingDocument.fromMap(doc.id, doc.data()))
+        .toList(growable: false);
+
+    bookings.sort((a, b) {
+      final int bTime = b.createdAt?.millisecondsSinceEpoch ?? 0;
+      final int aTime = a.createdAt?.millisecondsSinceEpoch ?? 0;
+      return bTime.compareTo(aTime);
+    });
+
+    return bookings;
+  }
+
+  Future<List<VoyageBookingDocument>> fetchBookingsByRequesterUid(
+    String requesterUid, {
+    int limit = 50,
+  }) async {
+    final String normalizedRequesterUid = requesterUid.trim();
+    if (normalizedRequesterUid.isEmpty) return const <VoyageBookingDocument>[];
+
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _firestore
+        .collection('voyageBookings')
+        .where('requesterUid', isEqualTo: normalizedRequesterUid)
+        .limit(limit)
+        .get();
+
+    final List<VoyageBookingDocument> bookings = snapshot.docs
+        .map((doc) => VoyageBookingDocument.fromMap(doc.id, doc.data()))
+        .toList(growable: false);
+
+    bookings.sort((a, b) {
+      final int bTime = b.createdAt?.millisecondsSinceEpoch ?? 0;
+      final int aTime = a.createdAt?.millisecondsSinceEpoch ?? 0;
+      return bTime.compareTo(aTime);
+    });
+
+    return bookings;
+  }
+
+  Future<VoyageBookingDocument?> findBookingByTrackNum(String trackNum) async {
+    final String normalizedTrackNum = trackNum.trim();
+    if (normalizedTrackNum.isEmpty) return null;
+
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _firestore
+        .collection('voyageBookings')
+        .where('trackNum', isEqualTo: normalizedTrackNum)
+        .limit(1)
+        .get();
+
+    if (snapshot.docs.isEmpty) return null;
+    final QueryDocumentSnapshot<Map<String, dynamic>> doc = snapshot.docs.first;
+    return VoyageBookingDocument.fromMap(doc.id, doc.data());
+  }
+
+  Future<void> updateBookingStatus({
+    required String bookingId,
+    required String status,
+  }) async {
+    final String normalizedBookingId = bookingId.trim();
+    final String normalizedStatus = status.trim();
+    if (normalizedBookingId.isEmpty || normalizedStatus.isEmpty) return;
+
+    await _firestore.collection('voyageBookings').doc(normalizedBookingId).set(
+      <String, dynamic>{
+        'status': normalizedStatus,
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+  }
+
+  Future<void> cancelBookingById({
+    required String bookingId,
+    required String tripId,
+    required int requestedSeats,
+  }) async {
+    final String normalizedBookingId = bookingId.trim();
+    final String normalizedTripId = tripId.trim();
+    if (normalizedBookingId.isEmpty) return;
+
+    final DocumentReference<Map<String, dynamic>> bookingRef = _firestore.collection('voyageBookings').doc(normalizedBookingId);
+    final DocumentReference<Map<String, dynamic>> tripRef = _firestore.collection('voyageTrips').doc(normalizedTripId);
+
+    await _firestore.runTransaction((transaction) async {
+      final DocumentSnapshot<Map<String, dynamic>> bookingSnap = await transaction.get(bookingRef);
+      if (!bookingSnap.exists || bookingSnap.data() == null) {
+        throw Exception('Reservation introuvable.');
+      }
+
+      final Map<String, dynamic> booking = bookingSnap.data()!;
+      final String status = (booking['status'] as String? ?? '').trim().toLowerCase();
+      if (status == 'cancelled') {
+        return;
+      }
+      if (status == 'rejected' || status == 'refused') {
+        throw Exception('Reservation non annulable.');
+      }
+
+      transaction.set(
+        bookingRef,
+        <String, dynamic>{
+          'status': 'cancelled',
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      if (normalizedTripId.isEmpty || requestedSeats <= 0) {
+        return;
+      }
+
+      final DocumentSnapshot<Map<String, dynamic>> tripSnap = await transaction.get(tripRef);
+      if (!tripSnap.exists || tripSnap.data() == null) {
+        return;
+      }
+
+      final int availableSeats = _toInt(tripSnap.data()!['seats'], 0);
+      transaction.set(
+        tripRef,
+        <String, dynamic>{
+          'seats': availableSeats + requestedSeats,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    });
+  }
+
   String _toStringSafe(Object? value) => value is String ? value.trim() : '';
 
   int _toInt(Object? value, int fallback) {

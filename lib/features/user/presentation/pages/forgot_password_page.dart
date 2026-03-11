@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
@@ -56,7 +57,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Mot de passe oubli\u00E9')),
+      appBar: AppBar(
+        leading: const HomeAppBarButton(),
+        title: const Text('Mot de passe oubli\u00E9'),
+      ),
       body: Container(
         width: double.infinity,
         decoration: const BoxDecoration(

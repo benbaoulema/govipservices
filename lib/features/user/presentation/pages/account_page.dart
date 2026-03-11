@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:govipservices/app/router/app_routes.dart';
+import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
 class AccountPage extends StatelessWidget {
   const AccountPage({super.key});
@@ -8,7 +9,7 @@ class AccountPage extends StatelessWidget {
   Future<void> _logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
     if (!context.mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil(AppRoutes.authLogin, (route) => false);
+    Navigator.of(context).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
   }
 
   @override
@@ -20,7 +21,10 @@ class AccountPage extends StatelessWidget {
         : 'Mon compte';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Mon compte')),
+      appBar: AppBar(
+        leading: const HomeAppBarButton(),
+        title: const Text('Mon compte'),
+      ),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(

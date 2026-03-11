@@ -18,6 +18,7 @@ void main() {
     const TripDetailModel trip = TripDetailModel(
       id: 't1',
       trackNum: '12345678',
+      ownerUid: 'owner-1',
       departurePlace: 'Abidjan, CI',
       arrivalPlace: 'Yamoussoukro, CI',
       departureDate: '2026-03-10',

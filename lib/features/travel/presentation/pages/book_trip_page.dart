@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/domain/models/trip_detail_models.dart';
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
+import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
 enum _BookingDateChoice { today, tomorrow, custom }
 
@@ -450,6 +451,10 @@ class _BookTripPageState extends State<BookTripPage> {
 
     return Scaffold(
       backgroundColor: _travelPageBg,
+      appBar: AppBar(
+        leading: const HomeAppBarButton(),
+        title: const Text('Réserver'),
+      ),
       body: DecoratedBox(
         decoration: const BoxDecoration(
           gradient: LinearGradient(

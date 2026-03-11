@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/domain/models/trip_detail_models.dart';
+import 'package:govipservices/features/travel/presentation/pages/my_trips_page.dart';
+import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
 const double _topPanelMaxExtent = 286;
 
@@ -37,7 +39,7 @@ class _HomePageState extends State<HomePage> {
   HomeMode _activeMode = HomeMode.travel;
   int _travelIndex = 0;
   int _parcelsIndex = 0;
-  late final Future<List<TripSearchResult>> _featuredProTripsFuture;
+  late Future<List<TripSearchResult>> _featuredProTripsFuture;
 
   static const List<HomeMenuItem> _travelItems = [
     HomeMenuItem(
@@ -111,13 +113,28 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _selectedIndex = index;
     });
+    if (_activeMode == HomeMode.travel && index == 2) {
+      return;
+    }
     await Navigator.of(context).pushNamed(item.route);
   }
 
   @override
   void initState() {
     super.initState();
-    _featuredProTripsFuture = _travelRepository.fetchFeaturedProTrips();
+    _featuredProTripsFuture = _loadFeaturedProTrips();
+  }
+
+  Future<List<TripSearchResult>> _loadFeaturedProTrips() {
+    return _travelRepository.fetchFeaturedProTrips();
+  }
+
+  Future<void> _refreshHome() async {
+    final Future<List<TripSearchResult>> featuredProTripsFuture = _loadFeaturedProTrips();
+    setState(() {
+      _featuredProTripsFuture = featuredProTripsFuture;
+    });
+    await featuredProTripsFuture;
   }
 
   Future<void> _openAccount() async {
@@ -141,14 +158,17 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final bool isTravel = _activeMode == HomeMode.travel;
+    final bool showMyTrips = isTravel && _selectedIndex == 2;
     final Color accent = isTravel ? _travelAccent : _parcelAccent;
     final List<HomeMenuItem> items = _activeItems;
     final List<HomeMenuItem> travelSecondaryItems = _travelItems.sublist(1);
     final double topInset = MediaQuery.paddingOf(context).top + kToolbarHeight + 12;
+    final double refreshOffset = MediaQuery.paddingOf(context).top + kToolbarHeight;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
+        leading: const HomeAppBarButton(),
         title: const Text('GoVIP Services'),
         actions: [
           Padding(
@@ -163,111 +183,127 @@ class _HomePageState extends State<HomePage> {
       ),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 260),
-        child: CustomScrollView(
-          key: ValueKey(_activeMode),
-          slivers: [
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(16, topInset, 16, 0),
-              sliver: SliverPersistentHeader(
-                pinned: false,
-                delegate: _TopPanelHeaderDelegate(
-                  minExtentValue: 0,
-                  maxExtentValue: _topPanelMaxExtent,
-                  child: Column(
-                    children: [
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF3F5F8),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: Row(
+        child: showMyTrips
+            ? Padding(
+                key: const ValueKey('my-trips-view'),
+                padding: EdgeInsets.fromLTRB(16, topInset, 16, 16),
+                child: const MyTripsView(),
+              )
+            : RefreshIndicator(
+                onRefresh: _refreshHome,
+                color: accent,
+                triggerMode: RefreshIndicatorTriggerMode.anywhere,
+                edgeOffset: refreshOffset,
+                displacement: 40,
+                child: CustomScrollView(
+                  key: ValueKey(_activeMode),
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
+                  ),
+                  slivers: [
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(16, topInset, 16, 0),
+                      sliver: SliverPersistentHeader(
+                        pinned: false,
+                        delegate: _TopPanelHeaderDelegate(
+                          minExtentValue: 0,
+                          maxExtentValue: _topPanelMaxExtent,
+                          child: Column(
                             children: [
-                              Expanded(
-                                child: _ModeButton(
-                                  label: 'Voyager',
-                                  selected: isTravel,
-                                  selectedColor: _travelAccent,
-                                  onTap: () => _selectMode(HomeMode.travel),
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF3F5F8),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(4),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: _ModeButton(
+                                          label: 'Voyager',
+                                          selected: isTravel,
+                                          selectedColor: _travelAccent,
+                                          onTap: () => _selectMode(HomeMode.travel),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: _ModeButton(
+                                          label: 'Colis',
+                                          selected: !isTravel,
+                                          selectedColor: _parcelAccent,
+                                          onTap: () => _selectMode(HomeMode.parcels),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                              Expanded(
-                                child: _ModeButton(
-                                  label: 'Colis',
-                                  selected: !isTravel,
-                                  selectedColor: _parcelAccent,
-                                  onTap: () => _selectMode(HomeMode.parcels),
-                                ),
-                              ),
+                              const SizedBox(height: 10),
+                              _HeroPanel(
+                                accent: accent,
+                                title: isTravel ? 'Voyagez en toute confiance' : 'Expediez facilement vos colis',
+                                description: isTravel
+                                    ? 'Publiez un trajet, r\u00E9servez rapidement et restez connect\u00E9 avec vos voyageurs.'
+                                    : 'Choisissez le service adapt\u00E9 : exp\u00E9dition, shopping VIP ou proposition de transport.',
+                                actionLabel: isTravel ? 'Reserver' : null,
+                                onAction: isTravel ? () => _openItem(_travelItems[1], 1) : null,
+                              )
+                                  .animate()
+                                  .fadeIn(duration: 320.ms)
+                                  .slideY(begin: 0.05, end: 0, curve: Curves.easeOutCubic),
                             ],
                           ),
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      _HeroPanel(
-                        accent: accent,
-                        title: isTravel ? 'Voyagez en toute confiance' : 'Expediez facilement vos colis',
-                        description: isTravel
-                            ? 'Publiez un trajet, r\u00E9servez rapidement et restez connect\u00E9 avec vos voyageurs.'
-                            : 'Choisissez le service adapt\u00E9 : exp\u00E9dition, shopping VIP ou proposition de transport.',
-                        actionLabel: isTravel ? 'Reserver' : null,
-                        onAction: isTravel ? () => _openItem(_travelItems[1], 1) : null,
-                      )
-                          .animate()
-                          .fadeIn(duration: 320.ms)
-                          .slideY(begin: 0.05, end: 0, curve: Curves.easeOutCubic),
-                    ],
-                  ),
+                    ),
+                    const SliverToBoxAdapter(child: SizedBox(height: 14)),
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      sliver: SliverToBoxAdapter(
+                        child: isTravel
+                            ? _FeaturedProTripsSection(
+                                future: _featuredProTripsFuture,
+                                accent: accent,
+                                onOpenTrip: _openFeaturedTrip,
+                              )
+                                  .animate()
+                                  .fadeIn(delay: 80.ms, duration: 260.ms)
+                                  .slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic)
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Actions principales',
+                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ).animate().fadeIn(delay: 80.ms, duration: 260.ms),
+                                  const SizedBox(height: 8),
+                                  ...items.asMap().entries.map(
+                                    (entry) {
+                                      final int index = entry.key;
+                                      final HomeMenuItem item = entry.value;
+                                      return Padding(
+                                        padding: const EdgeInsets.only(bottom: 10),
+                                        child: _ActionTile(
+                                          item: item,
+                                          accent: accent,
+                                          onTap: () => _openItem(item, index),
+                                        )
+                                            .animate()
+                                            .fadeIn(delay: Duration(milliseconds: 120 + (index * 70)), duration: 280.ms)
+                                            .slideX(begin: 0.08, end: 0, curve: Curves.easeOutCubic),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            const SliverToBoxAdapter(child: SizedBox(height: 14)),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              sliver: SliverToBoxAdapter(
-                child: isTravel
-                    ? _FeaturedProTripsSection(
-                        future: _featuredProTripsFuture,
-                        accent: accent,
-                        onOpenTrip: _openFeaturedTrip,
-                      )
-                          .animate()
-                          .fadeIn(delay: 80.ms, duration: 260.ms)
-                          .slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic)
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Actions principales',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ).animate().fadeIn(delay: 80.ms, duration: 260.ms),
-                          const SizedBox(height: 8),
-                          ...items.asMap().entries.map(
-                            (entry) {
-                              final int index = entry.key;
-                              final HomeMenuItem item = entry.value;
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: _ActionTile(
-                                  item: item,
-                                  accent: accent,
-                                  onTap: () => _openItem(item, index),
-                                )
-                                    .animate()
-                                    .fadeIn(delay: Duration(milliseconds: 120 + (index * 70)), duration: 280.ms)
-                                    .slideX(begin: 0.08, end: 0, curve: Curves.easeOutCubic),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-              ),
-            ),
-          ],
-        ),
       ),
       floatingActionButton: isTravel
           ? _PrimaryNavButton(

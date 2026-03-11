@@ -30,6 +30,7 @@ class TripDetailCubit extends ChangeNotifier {
 
   TripDetailState _state = const TripDetailState();
   TripDetailState get state => _state;
+  TripDetailAccessMode get accessMode => _args.accessMode;
 
   String get displayDate {
     final TripDetailModel? trip = _state.trip;

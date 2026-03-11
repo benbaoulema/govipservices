@@ -35,6 +35,7 @@ class TripDetailRepositoryImpl implements TripDetailRepository {
     return TripDetailModel(
       id: doc.id,
       trackNum: _str(raw['trackNum']),
+      ownerUid: _str(raw['ownerUid']),
       departurePlace: _str(raw['departurePlace']),
       arrivalPlace: _str(raw['arrivalPlace']),
       departureDate: _str(raw['departureDate']),

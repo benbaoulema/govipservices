@@ -15,6 +15,7 @@ import 'package:govipservices/features/travel/data/route_stop_suggestion_service
 import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
 import 'package:govipservices/features/user/data/user_firestore_repository.dart';
+import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
 enum _TripStep {
   departure,
@@ -105,7 +106,12 @@ class _PublishedTrip {
 }
 
 class AddTripPage extends StatefulWidget {
-  const AddTripPage({super.key});
+  const AddTripPage({
+    this.editTripId,
+    super.key,
+  });
+
+  final String? editTripId;
 
   @override
   State<AddTripPage> createState() => _AddTripPageState();
@@ -175,6 +181,7 @@ class _AddTripPageState extends State<AddTripPage> {
   String _currency = 'XOF';
   String _tripFrequency = 'none';
   bool _isPublishing = false;
+  bool _isLoadingExistingTrip = false;
   bool _isResolvingCurrentLocation = false;
   bool _isLoadingRouteStops = false;
   bool _hasAttemptedRouteSuggestions = false;
@@ -186,6 +193,7 @@ class _AddTripPageState extends State<AddTripPage> {
   _PublishedTrip? _submittedTrip;
   bool _userHasVehicleStored = false;
   String? _vehiclePhotoLocalPath;
+  String? _editingTrackNum;
 
   final List<_IntermediateStop> _intermediateStops = <_IntermediateStop>[];
   int get _routeStopsCount =>
@@ -234,7 +242,107 @@ class _AddTripPageState extends State<AddTripPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _requestStepFocus();
       _prefillFromConnectedUser();
+      _loadTripForEditingIfNeeded();
     });
+  }
+
+  Future<void> _loadTripForEditingIfNeeded() async {
+    final String tripId = widget.editTripId?.trim() ?? '';
+    if (tripId.isEmpty) return;
+
+    setState(() {
+      _isLoadingExistingTrip = true;
+    });
+
+    try {
+      final Map<String, dynamic>? raw = await _travelRepository.getTripRawById(tripId);
+      if (raw == null || !mounted) return;
+
+      final String departurePlace = (raw['departurePlace'] as String? ?? '').trim();
+      final String arrivalPlace = (raw['arrivalPlace'] as String? ?? '').trim();
+      final String departureDateRaw = (raw['departureDate'] as String? ?? '').trim();
+      final String departureTimeRaw = (raw['departureTime'] as String? ?? '').trim();
+      final List<_IntermediateStop> existingStops =
+          (raw['intermediateStops'] as List<dynamic>? ?? const <dynamic>[])
+              .whereType<Map>()
+              .map((entry) => Map<String, dynamic>.from(entry))
+              .map(
+                (stop) => _IntermediateStop(
+                  id: (stop['id'] ?? DateTime.now().microsecondsSinceEpoch.toString()).toString(),
+                  address: (stop['address'] ?? '').toString().trim(),
+                  estimatedTime: (stop['estimatedTime'] ?? '').toString().trim(),
+                  priceFromDeparture: ((stop['priceFromDeparture'] as num?) ?? 0).toDouble(),
+                  lat: (stop['lat'] as num?)?.toDouble(),
+                  lng: (stop['lng'] as num?)?.toDouble(),
+                  selected: stop['selected'] != false,
+                  source: (stop['source'] ?? 'manual').toString(),
+                ),
+              )
+              .toList(growable: false);
+
+      setState(() {
+        _departureController.text = departurePlace;
+        _arrivalController.text = arrivalPlace;
+        _departurePoint = _RoutePoint(
+          address: departurePlace,
+          lat: (raw['departureLat'] as num?)?.toDouble(),
+          lng: (raw['departureLng'] as num?)?.toDouble(),
+        );
+        _arrivalPoint = _RoutePoint(
+          address: arrivalPlace,
+          lat: (raw['arrivalLat'] as num?)?.toDouble(),
+          lng: (raw['arrivalLng'] as num?)?.toDouble(),
+        );
+        _departureDate = _parseApiDate(departureDateRaw);
+        _departureTime = _parseStoredTime(departureTimeRaw);
+        _seatsController.text = ((raw['seats'] as num?) ?? 1).toInt().toString();
+        _priceController.text = (((raw['pricePerSeat'] as num?) ?? 0).toDouble()).toStringAsFixed(0);
+        _driverController.text = (raw['driverName'] as String? ?? '').trim();
+        _phoneController.text = (raw['contactPhone'] as String? ?? '').trim();
+        _vehicleController.text = (raw['vehicleModel'] as String? ?? '').trim();
+        _vehiclePhotoUrlController.text = (raw['vehiclePhotoUrl'] as String? ?? '').trim();
+        _notesController.text = (raw['notes'] as String? ?? '').trim();
+        _maxWeightController.text = raw['maxWeightKg'] == null ? '' : '${raw['maxWeightKg']}';
+        _currency = ((raw['currency'] as String?)?.trim().isNotEmpty ?? false)
+            ? (raw['currency'] as String).trim().toUpperCase()
+            : 'XOF';
+        _isBus = raw['isBus'] == true;
+        _tripFrequency = ((raw['tripFrequency'] as String?)?.trim().isNotEmpty ?? false)
+            ? (raw['tripFrequency'] as String).trim()
+            : 'none';
+        _hasLuggageSpace = raw['hasLuggageSpace'] != false;
+        _allowsPets = raw['allowsPets'] == true;
+        _intermediateStops
+          ..clear()
+          ..addAll(existingStops);
+        _editingTrackNum = (raw['trackNum'] as String?)?.trim();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingExistingTrip = false;
+        });
+      }
+    }
+  }
+
+  DateTime? _parseApiDate(String raw) {
+    final Match? match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(raw);
+    if (match == null) return null;
+    final int? year = int.tryParse(match.group(1)!);
+    final int? month = int.tryParse(match.group(2)!);
+    final int? day = int.tryParse(match.group(3)!);
+    if (year == null || month == null || day == null) return null;
+    return DateTime(year, month, day);
+  }
+
+  TimeOfDay? _parseStoredTime(String raw) {
+    final Match? match = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(raw);
+    if (match == null) return null;
+    final int? hour = int.tryParse(match.group(1)!);
+    final int? minute = int.tryParse(match.group(2)!);
+    if (hour == null || minute == null) return null;
+    return TimeOfDay(hour: hour, minute: minute);
   }
 
   Future<void> _prefillFromConnectedUser() async {
@@ -1363,7 +1471,9 @@ class _AddTripPageState extends State<AddTripPage> {
     try {
       final String? vehiclePhotoUrl = await _uploadVehiclePhotoIfNeeded();
       final Map<String, dynamic> payload = _buildTripPayload(vehiclePhotoUrl: vehiclePhotoUrl);
-      final published = await _travelRepository.addTrip(payload);
+      final published = (widget.editTripId?.trim().isNotEmpty ?? false)
+          ? await _travelRepository.updateTrip(widget.editTripId!.trim(), payload)
+          : await _travelRepository.addTrip(payload);
       await _saveVehicleToUserIfMissing();
       if (!mounted) return;
 
@@ -1378,11 +1488,17 @@ class _AddTripPageState extends State<AddTripPage> {
         _isPublishing = false;
       });
       _showToast(
-        published.wasCreated
-            ? 'Trajet publie avec succes.'
-            : 'Ce trajet existe d\u00E9j\u00E0.',
+        widget.editTripId?.trim().isNotEmpty ?? false
+            ? published.alertCount > 0
+                ? 'Trajet modifie. Les voyageurs concernes seront informes.'
+                : 'Trajet modifie avec succes.'
+            : published.wasCreated
+                ? 'Trajet publie avec succes.'
+                : 'Ce trajet existe d\u00E9j\u00E0.',
         backgroundColor: const Color(0xFF166534),
-        icon: published.wasCreated ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+        icon: (widget.editTripId?.trim().isNotEmpty ?? false) || published.wasCreated
+            ? Icons.check_circle_rounded
+            : Icons.info_outline_rounded,
       );
     } catch (error) {
       if (!mounted) return;
@@ -2508,9 +2624,12 @@ class _AddTripPageState extends State<AddTripPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Ajouter un trajet'),
+        leading: const HomeAppBarButton(),
+        title: Text(widget.editTripId?.trim().isNotEmpty ?? false ? 'Modifier le trajet' : 'Ajouter un trajet'),
       ),
-      body: GestureDetector(
+      body: _isLoadingExistingTrip
+          ? const Center(child: CircularProgressIndicator())
+          : GestureDetector(
         onTap: _dismissKeyboard,
         behavior: HitTestBehavior.translucent,
         child: Form(

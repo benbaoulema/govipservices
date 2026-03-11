@@ -1,15 +1,23 @@
+enum TripDetailAccessMode {
+  traveler,
+  owner,
+  supportOnly,
+}
+
 class TripDetailArgs {
   const TripDetailArgs({
     required this.tripId,
     required this.from,
     required this.to,
     this.effectiveDepartureDate,
+    this.accessMode = TripDetailAccessMode.traveler,
   });
 
   final String tripId;
   final String from;
   final String to;
   final String? effectiveDepartureDate;
+  final TripDetailAccessMode accessMode;
 }
 
 class TripStopModel {
@@ -64,6 +72,7 @@ class TripDetailModel {
   const TripDetailModel({
     required this.id,
     required this.trackNum,
+    required this.ownerUid,
     required this.departurePlace,
     required this.arrivalPlace,
     required this.departureDate,
@@ -82,6 +91,7 @@ class TripDetailModel {
 
   final String id;
   final String trackNum;
+  final String ownerUid;
   final String departurePlace;
   final String arrivalPlace;
   final String departureDate;
