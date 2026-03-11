@@ -58,12 +58,6 @@ class _HomePageState extends State<HomePage> {
       route: AppRoutes.travelMyTrips,
       icon: Icons.route_outlined,
     ),
-    HomeMenuItem(
-      title: 'Messages',
-      subtitle: 'Discuter avec passagers et conducteurs',
-      route: AppRoutes.travelMessages,
-      icon: Icons.chat_bubble_outline,
-    ),
   ];
 
   static const List<HomeMenuItem> _parcelsItems = [
@@ -149,6 +143,7 @@ class _HomePageState extends State<HomePage> {
     final bool isTravel = _activeMode == HomeMode.travel;
     final Color accent = isTravel ? _travelAccent : _parcelAccent;
     final List<HomeMenuItem> items = _activeItems;
+    final List<HomeMenuItem> travelSecondaryItems = _travelItems.sublist(1);
     final double topInset = MediaQuery.paddingOf(context).top + kToolbarHeight + 12;
 
     return Scaffold(
@@ -274,19 +269,201 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: NavigationBar(
-          height: 74,
-          selectedIndex: _selectedIndex,
-          onDestinationSelected: (index) => _openItem(items[index], index),
-          destinations: [
-            for (final item in items)
-              NavigationDestination(
-                icon: Icon(item.icon),
-                selectedIcon: Icon(item.icon),
-                label: item.title,
+      floatingActionButton: isTravel
+          ? _PrimaryNavButton(
+              icon: Icons.add_rounded,
+              label: 'Ajouter',
+              accent: accent,
+              selected: _selectedIndex == 0,
+              onTap: () => _openItem(_travelItems[0], 0),
+            )
+          : null,
+      floatingActionButtonLocation:
+          isTravel ? FloatingActionButtonLocation.centerDocked : null,
+      bottomNavigationBar: isTravel
+          ? _TravelBottomBar(
+              items: travelSecondaryItems,
+              selectedIndex: _selectedIndex,
+              accent: accent,
+              onSelected: (index) => _openItem(_travelItems[index + 1], index + 1),
+            )
+          : SafeArea(
+              top: false,
+              child: NavigationBar(
+                height: 74,
+                selectedIndex: _selectedIndex,
+                onDestinationSelected: (index) => _openItem(items[index], index),
+                destinations: [
+                  for (final item in items)
+                    NavigationDestination(
+                      icon: Icon(item.icon),
+                      selectedIcon: Icon(item.icon),
+                      label: item.title,
+                    ),
+                ],
               ),
+            ),
+    );
+  }
+}
+
+class _TravelBottomBar extends StatelessWidget {
+  const _TravelBottomBar({
+    required this.items,
+    required this.selectedIndex,
+    required this.accent,
+    required this.onSelected,
+  });
+
+  final List<HomeMenuItem> items;
+  final int selectedIndex;
+  final Color accent;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return BottomAppBar(
+      height: 86,
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
+      color: Colors.white,
+      surfaceTintColor: Colors.white,
+      elevation: 14,
+      shape: const CircularNotchedRectangle(),
+      notchMargin: 10,
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            Expanded(
+              child: _BottomNavItemButton(
+                item: items[0],
+                selected: selectedIndex == 1,
+                accent: accent,
+                onTap: () => onSelected(0),
+              ),
+            ),
+            const SizedBox(width: 84),
+            Expanded(
+              child: _BottomNavItemButton(
+                item: items[1],
+                selected: selectedIndex == 2,
+                accent: accent,
+                onTap: () => onSelected(1),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PrimaryNavButton extends StatelessWidget {
+  const _PrimaryNavButton({
+    required this.icon,
+    required this.label,
+    required this.accent,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color accent;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color base = selected ? Color.lerp(accent, Colors.black, 0.08)! : accent;
+
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        elevation: 0,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onTap,
+          child: Ink(
+            width: 68,
+            height: 68,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color.lerp(base, Colors.white, 0.06)!,
+                  Color.lerp(base, Colors.black, 0.12)!,
+                ],
+              ),
+              border: Border.all(color: Colors.white, width: 4),
+              boxShadow: [
+                BoxShadow(
+                  color: base.withOpacity(0.30),
+                  blurRadius: 22,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child: Icon(
+              icon,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomNavItemButton extends StatelessWidget {
+  const _BottomNavItemButton({
+    required this.item,
+    required this.selected,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final HomeMenuItem item;
+  final bool selected;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color foreground = selected ? accent : const Color(0xFF667085);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          color: selected ? accent.withOpacity(0.10) : Colors.transparent,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(item.icon, color: foreground, size: 22),
+            const SizedBox(height: 4),
+            Text(
+              item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: foreground,
+                fontSize: 11,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+              ),
+            ),
           ],
         ),
       ),
