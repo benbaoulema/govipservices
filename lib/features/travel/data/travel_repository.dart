@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:govipservices/features/notifications/data/firestore_notifications_repository.dart';
+import 'package:govipservices/features/notifications/domain/models/app_notification.dart';
 import 'package:govipservices/features/travel/domain/travel_service.dart';
 
 class TripSearchResult {
@@ -43,10 +45,14 @@ class TripSearchResult {
 
 class TravelRepository implements TravelService {
   TravelRepository({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
+      : _firestore = firestore ?? FirebaseFirestore.instance,
+        _notificationsRepository = FirestoreNotificationsRepository(
+          firestore: firestore ?? FirebaseFirestore.instance,
+        );
 
   static const String _googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
   final FirebaseFirestore _firestore;
+  final FirestoreNotificationsRepository _notificationsRepository;
 
   @override
   Future<PublishedTripResult> addTrip(Map<String, dynamic> payload) async {
@@ -276,6 +282,16 @@ class TravelRepository implements TravelService {
     return Map<String, dynamic>.from(data);
   }
 
+  Future<TripSearchResult?> fetchTripById(String tripId) async {
+    final String normalizedTripId = tripId.trim();
+    if (normalizedTripId.isEmpty) return null;
+
+    final DocumentSnapshot<Map<String, dynamic>> snapshot =
+        await _firestore.collection('voyageTrips').doc(normalizedTripId).get();
+    if (!snapshot.exists || snapshot.data() == null) return null;
+    return _tripFromData(snapshot.id, snapshot.data()!);
+  }
+
   Future<PublishedTripResult> updateTrip(
     String tripId,
     Map<String, dynamic> payload,
@@ -385,11 +401,14 @@ class TravelRepository implements TravelService {
     final Map<String, dynamic> newValues = _extractAlertValues(updatedPayload, changedFields);
     final String message =
         'Le trajet $tripTrackNum a été modifié. Des réservations liées sont potentiellement impactées.';
+    final List<CreateAppNotificationInput> notifications =
+        <CreateAppNotificationInput>[];
 
     final WriteBatch batch = _firestore.batch();
     int count = 0;
     for (final QueryDocumentSnapshot<Map<String, dynamic>> bookingDoc in bookingsSnapshot.docs) {
       final Map<String, dynamic> booking = bookingDoc.data();
+      final String requesterUid = _safeString(booking['requesterUid']);
       final DocumentReference<Map<String, dynamic>> alertRef = alertsRef.doc();
       batch.set(alertRef, <String, dynamic>{
         'type': 'trip_updated',
@@ -414,10 +433,30 @@ class TravelRepository implements TravelService {
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
+      notifications.add(
+        CreateAppNotificationInput(
+          userId: requesterUid,
+          domain: 'travel',
+          type: 'trip_updated',
+          title: 'Trajet modifié',
+          body: 'Un trajet réservé a été mis à jour. Ouvrez-le pour voir les changements.',
+          entityType: 'trip',
+          entityId: tripId,
+          data: <String, dynamic>{
+            'tripId': tripId,
+            'tripTrackNum': tripTrackNum,
+            'bookingId': bookingDoc.id,
+            'bookingTrackNum': _safeString(booking['trackNum']),
+            'changedFields': changedFields,
+            'requesterUid': requesterUid,
+          },
+        ),
+      );
       count++;
     }
 
     await batch.commit();
+    await _notificationsRepository.createNotifications(notifications);
     return count;
   }
 
@@ -466,6 +505,11 @@ class TravelRepository implements TravelService {
     final String normalizedTripId = tripId.trim();
     if (normalizedTripId.isEmpty) return;
 
+    final DocumentReference<Map<String, dynamic>> tripRef =
+        _firestore.collection('voyageTrips').doc(normalizedTripId);
+    final DocumentSnapshot<Map<String, dynamic>> tripSnapshot = await tripRef.get();
+    final Map<String, dynamic> trip = tripSnapshot.data() ?? const <String, dynamic>{};
+
     await _firestore.collection('voyageTrips').doc(normalizedTripId).set(
       <String, dynamic>{
         'status': 'cancelled',
@@ -473,6 +517,40 @@ class TravelRepository implements TravelService {
       },
       SetOptions(merge: true),
     );
+
+    final QuerySnapshot<Map<String, dynamic>> bookingsSnapshot = await _firestore
+        .collection('voyageBookings')
+        .where('tripId', isEqualTo: normalizedTripId)
+        .get();
+
+    if (bookingsSnapshot.docs.isEmpty) return;
+
+    final String tripTrackNum = _safeString(trip['trackNum']);
+    final List<CreateAppNotificationInput> notifications = bookingsSnapshot.docs
+        .map((doc) {
+          final Map<String, dynamic> booking = doc.data();
+          final String requesterUid = _safeString(booking['requesterUid']);
+          return CreateAppNotificationInput(
+            userId: requesterUid,
+            domain: 'travel',
+            type: 'trip_cancelled',
+            title: 'Trajet annulé',
+            body: 'Un trajet réservé a été annulé.',
+            entityType: 'trip',
+            entityId: normalizedTripId,
+            data: <String, dynamic>{
+              'tripId': normalizedTripId,
+              'tripTrackNum': tripTrackNum,
+              'bookingId': doc.id,
+              'bookingTrackNum': _safeString(booking['trackNum']),
+              'requesterUid': requesterUid,
+            },
+          );
+        })
+        .where((input) => input.userId.trim().isNotEmpty)
+        .toList(growable: false);
+
+    await _notificationsRepository.createNotifications(notifications);
   }
 
   Future<String?> _computeIntermediateSegmentArrivalTime({
@@ -572,7 +650,10 @@ class TravelRepository implements TravelService {
   }
 
   TripSearchResult? _tripFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
-    final Map<String, dynamic> data = doc.data();
+    return _tripFromData(doc.id, doc.data());
+  }
+
+  TripSearchResult? _tripFromData(String id, Map<String, dynamic> data) {
     final String departurePlace = (data['departurePlace'] as String? ?? '').trim();
     final String arrivalPlace = (data['arrivalPlace'] as String? ?? '').trim();
     final String departureDate = (data['departureDate'] as String? ?? '').trim();
@@ -588,7 +669,7 @@ class TravelRepository implements TravelService {
     );
 
     return TripSearchResult(
-      id: doc.id,
+      id: id,
       departurePlace: departurePlace,
       arrivalPlace: arrivalPlace,
       departureDate: departureDate,

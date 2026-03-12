@@ -41,28 +41,28 @@ String _departureCountdownLabel({
     departureTime: departureTime,
   );
   if (departure == null) {
-    return 'Date a confirmer';
+    return 'Date à confirmer';
   }
 
   final Duration diff = departure.difference(DateTime.now());
   if (diff.inMinutes <= 0) {
-    return 'Depart imminent';
+    return 'Départ imminent';
   }
 
   if (diff.inHours < 24) {
     final int hours = diff.inHours;
     final int minutes = diff.inMinutes.remainder(60);
     if (hours <= 0) {
-      return 'Depart dans $minutes min';
+      return 'Départ dans $minutes min';
     }
     if (minutes == 0) {
-      return 'Depart dans $hours h';
+      return 'Départ dans $hours h';
     }
-    return 'Depart dans $hours h $minutes min';
+    return 'Départ dans $hours h $minutes min';
   }
 
   final int days = diff.inDays + (diff.inHours.remainder(24) > 0 ? 1 : 0);
-  return 'Depart dans $days jour${days > 1 ? 's' : ''}';
+  return 'Départ dans $days jour${days > 1 ? 's' : ''}';
 }
 
 DateTime? _tryParseDepartureDateTime({

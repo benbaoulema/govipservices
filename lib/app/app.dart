@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:govipservices/app/navigation/app_navigator.dart';
 import 'package:govipservices/app/presentation/intro_page.dart';
 import 'package:govipservices/app/router/app_router.dart';
+import 'package:govipservices/features/travel/presentation/widgets/global_booking_request_listener.dart';
 
 class GoVipApp extends StatelessWidget {
   const GoVipApp({super.key});
@@ -12,6 +14,7 @@ class GoVipApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: rootNavigatorKey,
       title: 'GoVIP Services',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -68,6 +71,9 @@ class GoVipApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
+      builder: (context, child) => GlobalBookingRequestListener(
+        child: child ?? const SizedBox.shrink(),
+      ),
       home: const IntroGatePage(),
       onGenerateRoute: AppRouter.onGenerateRoute,
     );

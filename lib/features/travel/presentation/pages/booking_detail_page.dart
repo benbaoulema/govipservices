@@ -37,8 +37,8 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Annuler la reservation'),
-          content: const Text('Voulez-vous vraiment annuler cette reservation ?'),
+          title: const Text('Annuler la réservation'),
+          content: const Text('Voulez-vous vraiment annuler cette réservation ?'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -97,7 +97,7 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
     return Scaffold(
       appBar: AppBar(
         leading: const HomeAppBarButton(),
-        title: const Text('Reservation'),
+        title: const Text('Réservation'),
       ),
       bottomNavigationBar: SafeArea(
         top: false,
@@ -115,7 +115,7 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                     ),
                   )
                 : const Icon(Icons.cancel_outlined),
-            label: Text(_canCancel ? 'Annuler la reservation' : 'Reservation non annulable'),
+            label: Text(_canCancel ? 'Annuler la réservation' : 'Réservation non annulable'),
           ),
         ),
       ),
@@ -150,10 +150,10 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
               children: [
                 _BookingLine(label: 'Conducteur', value: _booking.tripDriverName),
                 const SizedBox(height: 10),
-                _BookingLine(label: 'Telephone', value: _booking.tripContactPhone),
+                _BookingLine(label: 'Téléphone', value: _booking.tripContactPhone),
                 if (_booking.tripVehicleModel.trim().isNotEmpty) ...[
                   const SizedBox(height: 10),
-                  _BookingLine(label: 'Vehicule', value: _booking.tripVehicleModel),
+                  _BookingLine(label: 'Véhicule', value: _booking.tripVehicleModel),
                 ],
               ],
             ),
@@ -161,7 +161,7 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
           if (_booking.tripIntermediateStops.isNotEmpty) ...[
             const SizedBox(height: 16),
             _BookingSection(
-              title: 'Arrets intermediaires',
+              title: 'Arrêts intermédiaires',
               child: Column(
                 children: [
                   for (int i = 0; i < _booking.tripIntermediateStops.length; i++) ...[
@@ -197,12 +197,12 @@ String _bookingStatusLabel(String raw) {
     case 'accepted':
     case 'approved':
     case 'confirmed':
-      return 'Acceptee';
+      return 'Acceptée';
     case 'rejected':
     case 'refused':
-      return 'Refusee';
+      return 'Refusée';
     case 'cancelled':
-      return 'Annulee';
+      return 'Annulée';
     case 'pending':
     default:
       return 'En attente';

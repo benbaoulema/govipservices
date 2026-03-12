@@ -1,13 +1,20 @@
 import 'dart:math';
+import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:govipservices/features/notifications/data/firestore_notifications_repository.dart';
+import 'package:govipservices/features/notifications/domain/models/app_notification.dart';
 import 'package:govipservices/features/travel/domain/models/voyage_booking_models.dart';
 
 class VoyageBookingService {
   VoyageBookingService({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
+      : _firestore = firestore ?? FirebaseFirestore.instance,
+        _notificationsRepository = FirestoreNotificationsRepository(
+          firestore: firestore ?? FirebaseFirestore.instance,
+        );
 
   final FirebaseFirestore _firestore;
+  final FirestoreNotificationsRepository _notificationsRepository;
 
   Future<VoyageBookingDocument> createBooking(CreateVoyageBookingInput input) async {
     final String? inputError = validateCreateVoyageBookingInput(input);
@@ -94,7 +101,10 @@ class VoyageBookingService {
       'createdAt': null,
       'updatedAt': null,
     };
-    return VoyageBookingDocument.fromMap(bookingRef.id, merged);
+    final VoyageBookingDocument booking =
+        VoyageBookingDocument.fromMap(bookingRef.id, merged);
+    await _notifyBookingCreated(booking);
+    return booking;
   }
 
   Future<List<VoyageBookingDocument>> fetchBookingsByTripId(String tripId) async {
@@ -117,6 +127,63 @@ class VoyageBookingService {
     });
 
     return bookings;
+  }
+
+  Stream<List<VoyageBookingDocument>> watchBookingsByTripId(String tripId) {
+    final String normalizedTripId = tripId.trim();
+    if (normalizedTripId.isEmpty) {
+      return Stream<List<VoyageBookingDocument>>.value(
+        const <VoyageBookingDocument>[],
+      );
+    }
+
+    return _firestore
+        .collection('voyageBookings')
+        .where('tripId', isEqualTo: normalizedTripId)
+        .snapshots()
+        .map((snapshot) {
+      final List<VoyageBookingDocument> bookings = snapshot.docs
+          .map((doc) => VoyageBookingDocument.fromMap(doc.id, doc.data()))
+          .toList(growable: false);
+
+      bookings.sort((a, b) {
+        final int bTime = b.createdAt?.millisecondsSinceEpoch ?? 0;
+        final int aTime = a.createdAt?.millisecondsSinceEpoch ?? 0;
+        return bTime.compareTo(aTime);
+      });
+
+        return bookings;
+    });
+  }
+
+  Stream<List<VoyageBookingDocument>> watchPendingBookingsForOwnerUid(
+    String ownerUid,
+  ) {
+    final String normalizedOwnerUid = ownerUid.trim();
+    if (normalizedOwnerUid.isEmpty) {
+      return Stream<List<VoyageBookingDocument>>.value(
+        const <VoyageBookingDocument>[],
+      );
+    }
+
+    return _firestore
+        .collection('voyageBookings')
+        .where('tripOwnerUid', isEqualTo: normalizedOwnerUid)
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .map((snapshot) {
+      final List<VoyageBookingDocument> bookings = snapshot.docs
+          .map((doc) => VoyageBookingDocument.fromMap(doc.id, doc.data()))
+          .toList(growable: false);
+
+      bookings.sort((a, b) {
+        final int bTime = b.createdAt?.millisecondsSinceEpoch ?? 0;
+        final int aTime = a.createdAt?.millisecondsSinceEpoch ?? 0;
+        return bTime.compareTo(aTime);
+      });
+
+      return bookings;
+    });
   }
 
   Future<List<VoyageBookingDocument>> fetchBookingsByRequesterUid(
@@ -160,20 +227,89 @@ class VoyageBookingService {
     return VoyageBookingDocument.fromMap(doc.id, doc.data());
   }
 
+  Future<VoyageBookingDocument?> fetchBookingById(String bookingId) async {
+    final String normalizedBookingId = bookingId.trim();
+    if (normalizedBookingId.isEmpty) return null;
+
+    final DocumentSnapshot<Map<String, dynamic>> snapshot =
+        await _firestore.collection('voyageBookings').doc(normalizedBookingId).get();
+    if (!snapshot.exists || snapshot.data() == null) return null;
+    return VoyageBookingDocument.fromMap(snapshot.id, snapshot.data()!);
+  }
+
   Future<void> updateBookingStatus({
     required String bookingId,
     required String status,
   }) async {
     final String normalizedBookingId = bookingId.trim();
-    final String normalizedStatus = status.trim();
+    final String normalizedStatus = status.trim().toLowerCase();
     if (normalizedBookingId.isEmpty || normalizedStatus.isEmpty) return;
 
-    await _firestore.collection('voyageBookings').doc(normalizedBookingId).set(
-      <String, dynamic>{
-        'status': normalizedStatus,
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
+    final DocumentReference<Map<String, dynamic>> bookingRef =
+        _firestore.collection('voyageBookings').doc(normalizedBookingId);
+    late VoyageBookingDocument booking;
+
+    await _firestore.runTransaction((transaction) async {
+      final DocumentSnapshot<Map<String, dynamic>> snapshot =
+          await transaction.get(bookingRef);
+      if (!snapshot.exists || snapshot.data() == null) return;
+
+      booking = VoyageBookingDocument.fromMap(snapshot.id, snapshot.data()!);
+      final String previousStatus = booking.status.trim().toLowerCase();
+      if (previousStatus == normalizedStatus) return;
+
+      final String normalizedTripId = booking.tripId.trim();
+      if (normalizedTripId.isNotEmpty) {
+        final DocumentReference<Map<String, dynamic>> tripRef =
+            _firestore.collection('voyageTrips').doc(normalizedTripId);
+        final DocumentSnapshot<Map<String, dynamic>> tripSnapshot =
+            await transaction.get(tripRef);
+        if (tripSnapshot.exists && tripSnapshot.data() != null) {
+          final int availableSeats = _toInt(tripSnapshot.data()!['seats'], 0);
+          final int nextSeats = _computeAvailableSeatsAfterStatusTransition(
+            availableSeats: availableSeats,
+            requestedSeats: booking.requestedSeats,
+            previousStatus: previousStatus,
+            nextStatus: normalizedStatus,
+          );
+
+          if (nextSeats != availableSeats) {
+            if (nextSeats < 0) {
+              throw Exception('Places insuffisantes pour cette mise à jour.');
+            }
+            transaction.set(
+              tripRef,
+              <String, dynamic>{
+                'seats': nextSeats,
+                'updatedAt': FieldValue.serverTimestamp(),
+              },
+              SetOptions(merge: true),
+            );
+          }
+        }
+      }
+
+      transaction.set(
+        bookingRef,
+        <String, dynamic>{
+          'status': normalizedStatus,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    });
+
+    final DocumentSnapshot<Map<String, dynamic>> updatedSnapshot =
+        await bookingRef.get();
+    if (!updatedSnapshot.exists || updatedSnapshot.data() == null) return;
+    booking = VoyageBookingDocument.fromMap(
+      updatedSnapshot.id,
+      updatedSnapshot.data()!,
+    );
+
+    await _notifyBookingStatusUpdated(
+      booking: booking,
+      nextStatus: normalizedStatus,
     );
   }
 
@@ -192,7 +328,7 @@ class VoyageBookingService {
     await _firestore.runTransaction((transaction) async {
       final DocumentSnapshot<Map<String, dynamic>> bookingSnap = await transaction.get(bookingRef);
       if (!bookingSnap.exists || bookingSnap.data() == null) {
-        throw Exception('Reservation introuvable.');
+        throw Exception('Réservation introuvable.');
       }
 
       final Map<String, dynamic> booking = bookingSnap.data()!;
@@ -201,7 +337,7 @@ class VoyageBookingService {
         return;
       }
       if (status == 'rejected' || status == 'refused') {
-        throw Exception('Reservation non annulable.');
+        throw Exception('Réservation non annulable.');
       }
 
       transaction.set(
@@ -223,15 +359,103 @@ class VoyageBookingService {
       }
 
       final int availableSeats = _toInt(tripSnap.data()!['seats'], 0);
-      transaction.set(
-        tripRef,
-        <String, dynamic>{
-          'seats': availableSeats + requestedSeats,
-          'updatedAt': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
+      final int nextSeats = _computeAvailableSeatsAfterStatusTransition(
+        availableSeats: availableSeats,
+        requestedSeats: requestedSeats,
+        previousStatus: status,
+        nextStatus: 'cancelled',
       );
+      if (nextSeats != availableSeats) {
+        transaction.set(
+          tripRef,
+          <String, dynamic>{
+            'seats': nextSeats,
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      }
     });
+
+    final DocumentSnapshot<Map<String, dynamic>> updatedBookingSnap =
+        await bookingRef.get();
+    if (!updatedBookingSnap.exists || updatedBookingSnap.data() == null) {
+      return;
+    }
+
+    final VoyageBookingDocument booking = VoyageBookingDocument.fromMap(
+      updatedBookingSnap.id,
+      updatedBookingSnap.data()!,
+    );
+    await _notifyBookingCancelled(booking);
+  }
+
+  Future<void> _notifyBookingCreated(VoyageBookingDocument booking) async {
+    await _notificationsRepository.createNotification(
+      CreateAppNotificationInput(
+        userId: booking.tripOwnerUid,
+        domain: 'travel',
+        type: 'booking_created',
+        title: 'Nouvelle réservation',
+        body:
+            '${booking.requesterName} a réservé ${booking.requestedSeats} place${booking.requestedSeats > 1 ? 's' : ''}.',
+        entityType: 'booking',
+        entityId: booking.id,
+        data: <String, dynamic>{
+          'bookingId': booking.id,
+          'bookingTrackNum': booking.trackNum,
+          'tripId': booking.tripId,
+          'tripTrackNum': booking.tripTrackNum,
+        },
+      ),
+    );
+  }
+
+  Future<void> _notifyBookingStatusUpdated({
+    required VoyageBookingDocument booking,
+    required String nextStatus,
+  }) async {
+    await _notificationsRepository.createNotification(
+      CreateAppNotificationInput(
+        userId: booking.requesterUid,
+        domain: 'travel',
+        type: 'booking_status_updated',
+        title: _bookingStatusTitle(nextStatus),
+        body: _bookingStatusBody(nextStatus),
+        entityType: 'booking',
+        entityId: booking.id,
+        data: <String, dynamic>{
+          'bookingId': booking.id,
+          'bookingTrackNum': booking.trackNum,
+          'tripId': booking.tripId,
+          'tripTrackNum': booking.tripTrackNum,
+          'status': nextStatus,
+          'requesterUid': booking.requesterUid,
+        },
+      ),
+    );
+  }
+
+  Future<void> _notifyBookingCancelled(VoyageBookingDocument booking) async {
+    await _notificationsRepository.createNotification(
+      CreateAppNotificationInput(
+        userId: booking.tripOwnerUid,
+        domain: 'travel',
+        type: 'booking_cancelled',
+        title: 'Réservation annulée',
+        body:
+            '${booking.requesterName} a annulé sa réservation ${booking.trackNum}.',
+        entityType: 'booking',
+        entityId: booking.id,
+        data: <String, dynamic>{
+          'bookingId': booking.id,
+          'bookingTrackNum': booking.trackNum,
+          'tripId': booking.tripId,
+          'tripTrackNum': booking.tripTrackNum,
+          'tripOwnerUid': booking.tripOwnerUid,
+        },
+      ),
+    );
   }
 
   String _toStringSafe(Object? value) => value is String ? value.trim() : '';
@@ -240,6 +464,67 @@ class VoyageBookingService {
     if (value is int) return value;
     if (value is num) return value.toInt();
     return int.tryParse('$value') ?? fallback;
+  }
+}
+
+int _computeAvailableSeatsAfterStatusTransition({
+  required int availableSeats,
+  required int requestedSeats,
+  required String previousStatus,
+  required String nextStatus,
+}) {
+  final bool consumedBefore = _statusConsumesSeat(previousStatus);
+  final bool consumedAfter = _statusConsumesSeat(nextStatus);
+  if (consumedBefore == consumedAfter) {
+    return availableSeats;
+  }
+  if (consumedBefore && !consumedAfter) {
+    return availableSeats + requestedSeats;
+  }
+  return availableSeats - requestedSeats;
+}
+
+bool _statusConsumesSeat(String status) {
+  switch (status.trim().toLowerCase()) {
+    case 'pending':
+    case 'accepted':
+    case 'approved':
+    case 'confirmed':
+      return true;
+    default:
+      return false;
+  }
+}
+
+String _bookingStatusTitle(String status) {
+  switch (status.trim().toLowerCase()) {
+    case 'accepted':
+    case 'approved':
+    case 'confirmed':
+      return 'Réservation acceptée';
+    case 'rejected':
+    case 'refused':
+      return 'Réservation refusée';
+    case 'cancelled':
+      return 'Réservation annulée';
+    default:
+      return 'Mise à jour de réservation';
+  }
+}
+
+String _bookingStatusBody(String status) {
+  switch (status.trim().toLowerCase()) {
+    case 'accepted':
+    case 'approved':
+    case 'confirmed':
+      return 'Votre réservation a été acceptée.';
+    case 'rejected':
+    case 'refused':
+      return 'Votre réservation a été refusée.';
+    case 'cancelled':
+      return 'Votre réservation a été annulée.';
+    default:
+      return 'Le statut de votre réservation a changé.';
   }
 }
 

@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:govipservices/app/router/app_routes.dart';
+import 'package:govipservices/features/notifications/presentation/widgets/notifications_app_bar_button.dart';
 import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
 class AccountPage extends StatelessWidget {
@@ -24,6 +25,9 @@ class AccountPage extends StatelessWidget {
       appBar: AppBar(
         leading: const HomeAppBarButton(),
         title: const Text('Mon compte'),
+        actions: const [
+          NotificationsAppBarButton(),
+        ],
       ),
       body: Container(
         decoration: const BoxDecoration(

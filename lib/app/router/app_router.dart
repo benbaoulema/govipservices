@@ -4,6 +4,7 @@ import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/parcels/presentation/pages/offer_service_page.dart';
 import 'package:govipservices/features/parcels/presentation/pages/ship_package_page.dart';
 import 'package:govipservices/features/parcels/presentation/pages/vip_shopping_page.dart';
+import 'package:govipservices/features/notifications/presentation/pages/notifications_page.dart';
 import 'package:govipservices/features/travel/presentation/pages/add_trip_page.dart';
 import 'package:govipservices/features/travel/presentation/pages/book_trip_page.dart';
 import 'package:govipservices/features/travel/presentation/pages/messages_page.dart';
@@ -40,6 +41,11 @@ class AppRouter {
       case AppRoutes.userAccount:
         return MaterialPageRoute<void>(
           builder: (_) => const AccountPage(),
+          settings: settings,
+        );
+      case AppRoutes.userNotifications:
+        return MaterialPageRoute<void>(
+          builder: (_) => const NotificationsPage(),
           settings: settings,
         );
       case AppRoutes.parcelsShipPackage:

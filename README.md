@@ -2,6 +2,12 @@
 
 App de logistique et transport
 
+## Documentation
+
+- [Vue des features](./docs/features.md)
+- [Arrets intermediaires](./docs/travel/intermediate_stops.md)
+- [Notifications et FCM](./docs/notifications.md)
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.

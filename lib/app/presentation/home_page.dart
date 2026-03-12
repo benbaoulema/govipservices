@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:govipservices/app/router/app_routes.dart';
+import 'package:govipservices/features/notifications/presentation/widgets/notifications_app_bar_button.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/domain/models/trip_detail_models.dart';
 import 'package:govipservices/features/travel/presentation/pages/my_trips_page.dart';
@@ -171,6 +172,7 @@ class _HomePageState extends State<HomePage> {
         leading: const HomeAppBarButton(),
         title: const Text('GoVIP Services'),
         actions: [
+          const NotificationsAppBarButton(),
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: IconButton(
@@ -242,11 +244,11 @@ class _HomePageState extends State<HomePage> {
                               const SizedBox(height: 10),
                               _HeroPanel(
                                 accent: accent,
-                                title: isTravel ? 'Voyagez en toute confiance' : 'Expediez facilement vos colis',
+                                title: isTravel ? 'Voyagez en toute confiance' : 'Expédiez facilement vos colis',
                                 description: isTravel
                                     ? 'Publiez un trajet, r\u00E9servez rapidement et restez connect\u00E9 avec vos voyageurs.'
                                     : 'Choisissez le service adapt\u00E9 : exp\u00E9dition, shopping VIP ou proposition de transport.',
-                                actionLabel: isTravel ? 'Reserver' : null,
+                                actionLabel: isTravel ? 'Réserver' : null,
                                 onAction: isTravel ? () => _openItem(_travelItems[1], 1) : null,
                               )
                                   .animate()
@@ -893,7 +895,7 @@ class _FeaturedProTripsSection extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Une selection plus premium pour reserver rapidement.',
+              'Une sélection plus premium pour réserver rapidement.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: const Color(0xFF5B6472),
               ),
@@ -978,7 +980,7 @@ class _FeaturedTripsLoading extends StatelessWidget {
                     ),
                     SizedBox(height: 4),
                     Text(
-                      'Nous preparons une selection adaptee de trajets disponibles.',
+                      'Nous préparons une sélection adaptée de trajets disponibles.',
                       style: TextStyle(
                         color: Color(0xFF5B6472),
                         fontSize: 12,

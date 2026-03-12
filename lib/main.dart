@@ -5,9 +5,11 @@ import 'package:govipservices/app/app.dart';
 import 'package:govipservices/firebase/firebase_env.dart';
 import 'package:govipservices/firebase/firebase_options_dev.dart';
 import 'package:govipservices/firebase/firebase_options_prod.dart';
+import 'package:govipservices/features/notifications/presentation/fcm_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  bool firebaseReady = false;
   try {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       await Firebase.initializeApp();
@@ -21,9 +23,13 @@ Future<void> main() async {
         options: options,
       );
     }
+    firebaseReady = true;
   } catch (error, stackTrace) {
     debugPrint('Firebase init skipped: $error');
     debugPrintStack(stackTrace: stackTrace);
+  }
+  if (firebaseReady) {
+    await FcmService.instance.initialize();
   }
   runApp(const GoVipApp());
 }

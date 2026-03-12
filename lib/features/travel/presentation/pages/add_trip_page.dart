@@ -1099,7 +1099,7 @@ class _AddTripPageState extends State<AddTripPage> {
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         if (!mounted) return;
         _showToast(
-          'Permission de localisation refusee.',
+          'Permission de localisation refusée.',
           backgroundColor: const Color(0xFFB45309),
           icon: Icons.lock_outline_rounded,
         );
@@ -1227,7 +1227,7 @@ class _AddTripPageState extends State<AddTripPage> {
       );
       if (candidate.isBefore(DateTime.now())) {
         _showToast(
-          'Heure invalide: selectionnez une heure future.',
+          'Heure invalide : sélectionnez une heure future.',
           backgroundColor: const Color(0xFFB45309),
           icon: Icons.schedule_rounded,
         );
@@ -1490,10 +1490,10 @@ class _AddTripPageState extends State<AddTripPage> {
       _showToast(
         widget.editTripId?.trim().isNotEmpty ?? false
             ? published.alertCount > 0
-                ? 'Trajet modifie. Les voyageurs concernes seront informes.'
-                : 'Trajet modifie avec succes.'
+                ? 'Trajet modifié. Les voyageurs concernés seront informés.'
+                : 'Trajet modifié avec succès.'
             : published.wasCreated
-                ? 'Trajet publie avec succes.'
+                ? 'Trajet publié avec succès.'
                 : 'Ce trajet existe d\u00E9j\u00E0.',
         backgroundColor: const Color(0xFF166534),
         icon: (widget.editTripId?.trim().isNotEmpty ?? false) || published.wasCreated
@@ -2063,7 +2063,7 @@ class _AddTripPageState extends State<AddTripPage> {
         }
         return _TripFieldSection(
           title: 'Infos conducteur',
-          subtitle: 'Connectez-vous pour pre-remplir automatiquement nom, contact et vehicule.',
+          subtitle: 'Connectez-vous pour pré-remplir automatiquement nom, contact et véhicule.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -2076,7 +2076,7 @@ class _AddTripPageState extends State<AddTripPage> {
                   border: Border.all(color: const Color(0xFFE2E8F0)),
                 ),
                 child: Text(
-                  'Connexion recommandee: vos informations seront enregistrees et reutilisables sur vos prochains trajets.',
+                  'Connexion recommandée : vos informations seront enregistrées et réutilisables sur vos prochains trajets.',
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
@@ -2342,7 +2342,7 @@ class _AddTripPageState extends State<AddTripPage> {
         ];
         return _TripFieldSection(
           title: 'Fr\u00E9quence',
-          subtitle: 'Ponctuel est selectionne par defaut.',
+          subtitle: 'Ponctuel est sélectionné par défaut.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -2546,7 +2546,7 @@ class _AddTripPageState extends State<AddTripPage> {
                     : '${_maxWeightController.text.trim()} kg',
               ),
               _SummaryRow(
-                label: 'Arrets selectionnes',
+                label: 'Arrêts sélectionnés',
                 value: _intermediateStops.where((stop) => stop.selected).length.toString(),
               ),
             ],
@@ -2692,7 +2692,7 @@ class _AddTripPageState extends State<AddTripPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Trajet publie',
+                                'Trajet publié',
                                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                                   color: Colors.green.shade900,
                                   fontWeight: FontWeight.w700,
@@ -2702,7 +2702,7 @@ class _AddTripPageState extends State<AddTripPage> {
                               Text('ID: ${_submittedTrip!.id}'),
                               Text('Track: ${_submittedTrip!.trackNum}'),
                               Text(_submittedTrip!.title),
-                              Text('Arrets: ${_submittedTrip!.selectedStopsCount}'),
+                              Text('Arrêts : ${_submittedTrip!.selectedStopsCount}'),
                             ],
                           ),
                         ),
