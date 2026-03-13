@@ -12,6 +12,7 @@ void main() {
             maxSeats: 1,
             currency: 'XOF',
             total: 0,
+            hidePrice: false,
             canBook: false,
             onIncrement: () {},
             onDecrement: () {},

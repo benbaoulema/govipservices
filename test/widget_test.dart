@@ -7,7 +7,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:govipservices/main.dart';
+import 'package:govipservices/app/app.dart';
 
 void main() {
   testWidgets('Home switches between Voyager and Colis menus', (WidgetTester tester) async {

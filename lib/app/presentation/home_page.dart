@@ -214,11 +214,26 @@ class _HomePageState extends State<HomePage> {
                             children: [
                               DecoratedBox(
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF3F5F8),
-                                  borderRadius: BorderRadius.circular(14),
+                                  gradient: const LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [
+                                      Color(0xFFF7FBFA),
+                                      Color(0xFFEAF6F3),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(18),
+                                  border: Border.all(color: const Color(0xFFDCEEE9)),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.04),
+                                      blurRadius: 16,
+                                      offset: const Offset(0, 8),
+                                    ),
+                                  ],
                                 ),
                                 child: Padding(
-                                  padding: const EdgeInsets.all(4),
+                                  padding: const EdgeInsets.all(5),
                                   child: Row(
                                     children: [
                                       Expanded(
@@ -525,22 +540,46 @@ class _ModeButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: selected ? selectedColor : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
+          gradient: selected
+              ? LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color.lerp(selectedColor, Colors.white, 0.04)!,
+                    Color.lerp(selectedColor, Colors.black, 0.08)!,
+                  ],
+                )
+              : null,
+          color: selected ? null : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected
+                ? Colors.white.withOpacity(0.28)
+                : const Color(0x00000000),
+          ),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: selectedColor.withOpacity(0.24),
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : null,
         ),
         child: Text(
           label,
           textAlign: TextAlign.center,
           style: TextStyle(
             color: selected ? Colors.white : const Color(0xFF1F2937),
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.2,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.25,
           ),
         ),
       ),
@@ -888,14 +927,14 @@ class _FeaturedProTripsSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Trajets transporteur pro',
+              'Compagnies de transport',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w800,
               ),
             ),
             const SizedBox(height: 4),
             Text(
-              'Une sélection plus premium pour réserver rapidement.',
+              'Réservez rapidement auprès de compagnies de transport disponibles.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: const Color(0xFF5B6472),
               ),
@@ -972,7 +1011,7 @@ class _FeaturedTripsLoading extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Chargement des trajets pro',
+                      'Chargement des compagnies de transport',
                       style: TextStyle(
                         color: Color(0xFF10233E),
                         fontWeight: FontWeight.w800,
@@ -980,7 +1019,7 @@ class _FeaturedTripsLoading extends StatelessWidget {
                     ),
                     SizedBox(height: 4),
                     Text(
-                      'Nous préparons une sélection adaptée de trajets disponibles.',
+                      'Nous préparons une sélection adaptée de compagnies disponibles.',
                       style: TextStyle(
                         color: Color(0xFF5B6472),
                         fontSize: 12,
@@ -1474,7 +1513,7 @@ class _FeaturedTripsEmpty extends StatelessWidget {
           const SizedBox(width: 12),
           const Expanded(
             child: Text(
-              'Aucun trajet transporteur pro a mettre en avant pour le moment.',
+              'Aucune compagnie de transport à mettre en avant pour le moment.',
               style: TextStyle(
                 color: Color(0xFF4B5563),
                 fontWeight: FontWeight.w600,

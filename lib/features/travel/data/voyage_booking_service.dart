@@ -575,6 +575,27 @@ int computeVoyageBookingTotalPrice({
   return safeSegmentPrice * safeSeats;
 }
 
+String buildVoyageBookingDuplicateKey(CreateVoyageBookingInput input) {
+  final String travelersKey = input.travelers
+      .map(
+        (VoyageBookingTraveler traveler) =>
+            '${traveler.name.trim().toLowerCase()}::${traveler.contact.trim()}',
+      )
+      .join('|');
+
+  return <Object?>[
+    input.tripId.trim().toLowerCase(),
+    input.requestedSeats,
+    (input.requesterUid ?? '').trim().toLowerCase(),
+    input.requesterName.trim().toLowerCase(),
+    input.requesterContact.trim(),
+    input.segmentFrom.trim().toLowerCase(),
+    input.segmentTo.trim().toLowerCase(),
+    input.segmentPrice,
+    travelersKey,
+  ].join('##');
+}
+
 int _toIntStatic(Object? value, int fallback) {
   if (value is int) return value;
   if (value is num) return value.toInt();
