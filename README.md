@@ -4,7 +4,13 @@ App de logistique et transport
 
 ## Documentation
 
+- [Index documentation](./docs/index.md)
+- [Architecture](./docs/architecture.md)
 - [Vue des features](./docs/features.md)
+- [Travel](./docs/travel.md)
+- [Parcels](./docs/parcels.md)
+- [User](./docs/user.md)
+- [Disponibilite et presence](./docs/availability.md)
 - [Arrets intermediaires](./docs/travel/intermediate_stops.md)
 - [Notifications et FCM](./docs/notifications.md)
 

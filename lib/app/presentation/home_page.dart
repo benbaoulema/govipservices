@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:govipservices/app/presentation/widgets/home_availability_panel.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/notifications/presentation/widgets/notifications_app_bar_button.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/domain/models/trip_detail_models.dart';
 import 'package:govipservices/features/travel/presentation/pages/my_trips_page.dart';
+import 'package:govipservices/features/user/data/user_availability_service.dart';
 import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
-const double _topPanelMaxExtent = 286;
+const double _topPanelMaxExtent = 424;
 
 enum HomeMode { travel, parcels }
 
@@ -33,14 +35,17 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   static const Color _travelAccent = Color(0xFF14B8A6);
   static const Color _parcelAccent = Color(0xFF0F766E);
   final TravelRepository _travelRepository = TravelRepository();
+  final UserAvailabilityService _availabilityService = UserAvailabilityService();
   HomeMode _activeMode = HomeMode.travel;
   int _travelIndex = 0;
   int _parcelsIndex = 0;
   late Future<List<TripSearchResult>> _featuredProTripsFuture;
+  UserAvailabilitySnapshot _availability = UserAvailabilitySnapshot.offline();
+  bool _isUpdatingAvailability = false;
 
   static const List<HomeMenuItem> _travelItems = [
     HomeMenuItem(
@@ -123,11 +128,55 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _featuredProTripsFuture = _loadFeaturedProTrips();
+    _loadAvailability();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshAvailabilityPosition();
+    }
   }
 
   Future<List<TripSearchResult>> _loadFeaturedProTrips() {
     return _travelRepository.fetchFeaturedProTrips();
+  }
+
+  Future<void> _loadAvailability() async {
+    if (FirebaseAuth.instance.currentUser == null) return;
+    final UserAvailabilitySnapshot availability =
+        await _availabilityService.fetchCurrent();
+    if (!mounted) return;
+    setState(() {
+      _availability = availability;
+    });
+  }
+
+  Future<void> _refreshAvailabilityPosition() async {
+    if (_isUpdatingAvailability ||
+        FirebaseAuth.instance.currentUser == null ||
+        !_availability.isOnline) {
+      return;
+    }
+
+    try {
+      final UserAvailabilitySnapshot? refreshed =
+          await _availabilityService.refreshIfOnline();
+      if (!mounted || refreshed == null) return;
+      setState(() {
+        _availability = refreshed;
+      });
+    } catch (_) {
+      // Keep home resilient if location refresh fails in background.
+    }
   }
 
   Future<void> _refreshHome() async {
@@ -144,6 +193,143 @@ class _HomePageState extends State<HomePage> {
     await Navigator.of(context).pushNamed(route);
   }
 
+  Future<void> _toggleAvailability(bool nextValue) async {
+    final User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      await Navigator.of(context).pushNamed(AppRoutes.authLogin);
+      await _loadAvailability();
+      return;
+    }
+    if (_isUpdatingAvailability) return;
+
+    setState(() {
+      _isUpdatingAvailability = true;
+    });
+
+    try {
+      final UserAvailabilityScope scope =
+          _validatedScopeOrFallback(_defaultAvailabilityScopeForMode());
+      if (nextValue && !_canUseScope(scope)) {
+        _showScopeUnavailableMessage(scope);
+        return;
+      }
+      final UserAvailabilitySnapshot next = nextValue
+          ? await _availabilityService.goOnline(
+              scope: scope,
+            )
+          : await _availabilityService.goOffline();
+      if (!mounted) return;
+      setState(() {
+        _availability = next;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isUpdatingAvailability = false;
+      });
+    }
+  }
+
+  Future<void> _changeAvailabilityScope(UserAvailabilityScope scope) async {
+    if (_isUpdatingAvailability) return;
+    if (FirebaseAuth.instance.currentUser == null) {
+      await Navigator.of(context).pushNamed(AppRoutes.authLogin);
+      return;
+    }
+    if (!_canUseScope(scope)) {
+      _showScopeUnavailableMessage(scope);
+      return;
+    }
+    if (!_availability.isOnline) {
+      setState(() {
+        _availability = UserAvailabilitySnapshot(
+          isOnline: false,
+          scope: scope,
+          canProvideTravel: _availability.canProvideTravel,
+          canProvideParcels: _availability.canProvideParcels,
+        );
+      });
+      return;
+    }
+
+    setState(() {
+      _isUpdatingAvailability = true;
+    });
+
+    try {
+      final UserAvailabilitySnapshot next =
+          await _availabilityService.goOnline(scope: scope);
+      if (!mounted) return;
+      setState(() {
+        _availability = next;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isUpdatingAvailability = false;
+      });
+    }
+  }
+
+  UserAvailabilityScope _defaultAvailabilityScopeForMode() {
+    return _activeMode == HomeMode.travel
+        ? UserAvailabilityScope.travel
+        : UserAvailabilityScope.parcels;
+  }
+
+  bool get _shouldShowAvailabilityPanel =>
+      _availability.canProvideTravel || _availability.canProvideParcels;
+
+  UserAvailabilityScope _validatedScopeOrFallback(UserAvailabilityScope scope) {
+    if (_canUseScope(scope)) return scope;
+    if (_availability.canProvideTravel) return UserAvailabilityScope.travel;
+    if (_availability.canProvideParcels) return UserAvailabilityScope.parcels;
+    return scope;
+  }
+
+  bool _canUseScope(UserAvailabilityScope scope) {
+    switch (scope) {
+      case UserAvailabilityScope.travel:
+        return _availability.canProvideTravel;
+      case UserAvailabilityScope.parcels:
+        return _availability.canProvideParcels;
+      case UserAvailabilityScope.all:
+        return _availability.canProvideTravel &&
+            _availability.canProvideParcels;
+    }
+  }
+
+  void _showScopeUnavailableMessage(UserAvailabilityScope scope) {
+    final String message;
+    switch (scope) {
+      case UserAvailabilityScope.travel:
+        message =
+            'Publiez d abord un trajet pour pouvoir vous mettre en ligne en voyage.';
+        break;
+      case UserAvailabilityScope.parcels:
+        message =
+            'Proposez d abord un service colis pour pouvoir vous mettre en ligne.';
+        break;
+      case UserAvailabilityScope.all:
+        message =
+            'Vous devez avoir un trajet publie et un service colis actif pour utiliser Les deux.';
+        break;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   Future<void> _openFeaturedTrip(TripSearchResult trip) async {
     await Navigator.of(context).pushNamed(
       AppRoutes.travelTripDetail,
@@ -158,6 +344,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isAuthenticated = FirebaseAuth.instance.currentUser != null;
     final bool isTravel = _activeMode == HomeMode.travel;
     final bool showMyTrips = isTravel && _selectedIndex == 2;
     final Color accent = isTravel ? _travelAccent : _parcelAccent;
@@ -165,21 +352,27 @@ class _HomePageState extends State<HomePage> {
     final List<HomeMenuItem> travelSecondaryItems = _travelItems.sublist(1);
     final double topInset = MediaQuery.paddingOf(context).top + kToolbarHeight + 12;
     final double refreshOffset = MediaQuery.paddingOf(context).top + kToolbarHeight;
+    final double topPanelExtent =
+        _shouldShowAvailabilityPanel ? _topPanelMaxExtent : 286;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         leading: const HomeAppBarButton(),
-        title: const Text('GoVIP Services'),
-        actions: [
+        title: const Text('GVIP'),
+        actions: <Widget>[
           const NotificationsAppBarButton(),
           Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: IconButton(
-              tooltip: 'Mon compte',
-              onPressed: _openAccount,
-              icon: const Icon(Icons.account_circle_rounded),
-            ),
+            child: isAuthenticated
+                ? IconButton(
+                    tooltip: 'Mon compte',
+                    onPressed: _openAccount,
+                    icon: const Icon(Icons.account_circle_rounded),
+                  )
+                : _LoginCallToActionButton(
+                    onTap: _openAccount,
+                  ),
           ),
         ],
       ),
@@ -202,29 +395,44 @@ class _HomePageState extends State<HomePage> {
                   physics: const AlwaysScrollableScrollPhysics(
                     parent: BouncingScrollPhysics(),
                   ),
-                  slivers: [
+                  slivers: <Widget>[
                     SliverPadding(
                       padding: EdgeInsets.fromLTRB(16, topInset, 16, 0),
                       sliver: SliverPersistentHeader(
                         pinned: false,
                         delegate: _TopPanelHeaderDelegate(
                           minExtentValue: 0,
-                          maxExtentValue: _topPanelMaxExtent,
+                          maxExtentValue: topPanelExtent,
                           child: Column(
-                            children: [
+                            children: <Widget>[
+                              if (_shouldShowAvailabilityPanel) ...<Widget>[
+                                HomeAvailabilityPanel(
+                                  availability: _availability,
+                                  isBusy: _isUpdatingAvailability,
+                                  canTravelProvider:
+                                      _availability.canProvideTravel,
+                                  canParcelsProvider:
+                                      _availability.canProvideParcels,
+                                  onToggle: _toggleAvailability,
+                                  onScopeSelected: _changeAvailabilityScope,
+                                ),
+                                const SizedBox(height: 12),
+                              ],
                               DecoratedBox(
                                 decoration: BoxDecoration(
                                   gradient: const LinearGradient(
                                     begin: Alignment.topLeft,
                                     end: Alignment.bottomRight,
-                                    colors: [
+                                    colors: <Color>[
                                       Color(0xFFF7FBFA),
                                       Color(0xFFEAF6F3),
                                     ],
                                   ),
                                   borderRadius: BorderRadius.circular(18),
-                                  border: Border.all(color: const Color(0xFFDCEEE9)),
-                                  boxShadow: [
+                                  border: Border.all(
+                                    color: const Color(0xFFDCEEE9),
+                                  ),
+                                  boxShadow: <BoxShadow>[
                                     BoxShadow(
                                       color: Colors.black.withOpacity(0.04),
                                       blurRadius: 16,
@@ -235,7 +443,7 @@ class _HomePageState extends State<HomePage> {
                                 child: Padding(
                                   padding: const EdgeInsets.all(5),
                                   child: Row(
-                                    children: [
+                                    children: <Widget>[
                                       Expanded(
                                         child: _ModeButton(
                                           label: 'Voyager',
@@ -259,22 +467,32 @@ class _HomePageState extends State<HomePage> {
                               const SizedBox(height: 10),
                               _HeroPanel(
                                 accent: accent,
-                                title: isTravel ? 'Voyagez en toute confiance' : 'Expédiez facilement vos colis',
+                                title: isTravel
+                                    ? 'Voyagez en toute confiance'
+                                    : 'Expediez facilement vos colis',
                                 description: isTravel
-                                    ? 'Publiez un trajet, r\u00E9servez rapidement et restez connect\u00E9 avec vos voyageurs.'
-                                    : 'Choisissez le service adapt\u00E9 : exp\u00E9dition, shopping VIP ou proposition de transport.',
-                                actionLabel: isTravel ? 'Réserver' : null,
-                                onAction: isTravel ? () => _openItem(_travelItems[1], 1) : null,
+                                    ? 'Publiez un trajet, reservez rapidement et restez connecte avec vos voyageurs.'
+                                    : 'Choisissez le service adapte : expedition, shopping VIP ou proposition de transport.',
+                                actionLabel: isTravel ? 'Reserver' : null,
+                                onAction: isTravel
+                                    ? () => _openItem(_travelItems[1], 1)
+                                    : null,
                               )
                                   .animate()
                                   .fadeIn(duration: 320.ms)
-                                  .slideY(begin: 0.05, end: 0, curve: Curves.easeOutCubic),
+                                  .slideY(
+                                    begin: 0.05,
+                                    end: 0,
+                                    curve: Curves.easeOutCubic,
+                                  ),
                             ],
                           ),
                         ),
                       ),
                     ),
-                    const SliverToBoxAdapter(child: SizedBox(height: 14)),
+                    const SliverToBoxAdapter(
+                      child: SizedBox(height: 14),
+                    ),
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                       sliver: SliverToBoxAdapter(
@@ -286,34 +504,49 @@ class _HomePageState extends State<HomePage> {
                               )
                                   .animate()
                                   .fadeIn(delay: 80.ms, duration: 260.ms)
-                                  .slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic)
+                                  .slideY(
+                                    begin: 0.04,
+                                    end: 0,
+                                    curve: Curves.easeOutCubic,
+                                  )
                             : Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
+                                children: <Widget>[
                                   Text(
                                     'Actions principales',
-                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ).animate().fadeIn(delay: 80.ms, duration: 260.ms),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                  ).animate().fadeIn(
+                                        delay: 80.ms,
+                                        duration: 260.ms,
+                                      ),
                                   const SizedBox(height: 8),
-                                  ...items.asMap().entries.map(
-                                    (entry) {
-                                      final int index = entry.key;
-                                      final HomeMenuItem item = entry.value;
-                                      return Padding(
-                                        padding: const EdgeInsets.only(bottom: 10),
-                                        child: _ActionTile(
-                                          item: item,
-                                          accent: accent,
-                                          onTap: () => _openItem(item, index),
-                                        )
-                                            .animate()
-                                            .fadeIn(delay: Duration(milliseconds: 120 + (index * 70)), duration: 280.ms)
-                                            .slideX(begin: 0.08, end: 0, curve: Curves.easeOutCubic),
-                                      );
-                                    },
-                                  ),
+                                  ...items.asMap().entries.map((entry) {
+                                    final int index = entry.key;
+                                    final HomeMenuItem item = entry.value;
+                                    return Padding(
+                                      padding: const EdgeInsets.only(bottom: 10),
+                                      child: _ActionTile(
+                                        item: item,
+                                        accent: accent,
+                                        onTap: () => _openItem(item, index),
+                                      )
+                                          .animate()
+                                          .fadeIn(
+                                            delay: Duration(milliseconds: 120 + (index * 70)),
+                                            duration: 280.ms,
+                                          )
+                                          .slideX(
+                                            begin: 0.08,
+                                            end: 0,
+                                            curve: Curves.easeOutCubic,
+                                          ),
+                                    );
+                                  }),
                                 ],
                               ),
                       ),
@@ -331,8 +564,9 @@ class _HomePageState extends State<HomePage> {
               onTap: () => _openItem(_travelItems[0], 0),
             )
           : null,
-      floatingActionButtonLocation:
-          isTravel ? FloatingActionButtonLocation.centerDocked : null,
+      floatingActionButtonLocation: isTravel
+          ? FloatingActionButtonLocation.centerDocked
+          : null,
       bottomNavigationBar: isTravel
           ? _TravelBottomBar(
               items: travelSecondaryItems,
@@ -346,8 +580,8 @@ class _HomePageState extends State<HomePage> {
                 height: 74,
                 selectedIndex: _selectedIndex,
                 onDestinationSelected: (index) => _openItem(items[index], index),
-                destinations: [
-                  for (final item in items)
+                destinations: <Widget>[
+                  for (final HomeMenuItem item in items)
                     NavigationDestination(
                       icon: Icon(item.icon),
                       selectedIcon: Icon(item.icon),
@@ -1377,6 +1611,41 @@ class _MetaPill extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _LoginCallToActionButton extends StatelessWidget {
+  const _LoginCallToActionButton({
+    required this.onTap,
+  });
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Text(
+        'Se connecter',
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              letterSpacing: 0.1,
+            ),
+      )
+          .animate(onPlay: (controller) => controller.repeat())
+          .shimmer(
+            duration: 2400.ms,
+            color: const Color(0xFFFFF3BF),
+            angle: 0.2,
+          ),
     );
   }
 }

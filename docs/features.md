@@ -59,6 +59,15 @@ Fonctionnalites principales :
 - creation de compte
 - mot de passe oublie
 - compte utilisateur
+- disponibilite geolocalisee depuis l'accueil
+- aptitudes metier stockees dans `users/{uid}.capabilities`
+
+Champs metier transverses :
+
+- `capabilities.travelProvider`
+  - positionne apres publication d'un trajet
+- `capabilities.parcelsProvider`
+  - positionne apres creation d'un service colis
 
 ## Feature transverse
 
@@ -135,7 +144,13 @@ Push :
 
 ## Documentation existante
 
+- [Architecture](./architecture.md)
+- [Travel](./travel.md)
+- [Parcels](./parcels.md)
+- [User](./user.md)
 - [Arrets intermediaires](./travel/intermediate_stops.md)
+- [Disponibilite et presence](./availability.md)
+- [Notifications et FCM](./notifications.md)
 
 ## Prochaine extension recommandee
 

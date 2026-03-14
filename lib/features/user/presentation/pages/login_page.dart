@@ -11,7 +11,7 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _identifierController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
   bool _isSubmitting = false;
@@ -42,9 +42,21 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _identifierController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  bool _isPhoneIdentifier(String value) {
+    return RegExp(r'^\d{10}$').hasMatch(value.trim());
+  }
+
+  String _normalizeLoginIdentifier(String raw) {
+    final String value = raw.trim();
+    if (_isPhoneIdentifier(value)) {
+      return '225$value@govipuser.local';
+    }
+    return value;
   }
 
   void _showMessage(String message, {bool error = false}) {
@@ -68,8 +80,11 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
+      final String normalizedIdentifier = _normalizeLoginIdentifier(
+        _identifierController.text,
+      );
       await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
+        email: normalizedIdentifier,
         password: _passwordController.text,
       );
       if (!mounted) return;
@@ -124,20 +139,29 @@ class _LoginPageState extends State<LoginPage> {
                         children: [
                           const _AuthHeader(
                             title: 'Connexion',
-                            subtitle: 'Accedez a votre espace GoVIP.',
+                            subtitle: 'Accedez a votre espace GoVIP avec votre email ou votre numero.',
                           ),
                           const SizedBox(height: 18),
                           TextFormField(
-                            controller: _emailController,
+                            controller: _identifierController,
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
                             decoration: const InputDecoration(
-                              labelText: 'Email',
+                              labelText: 'Email ou numero',
                               prefixIcon: Icon(Icons.alternate_email_rounded),
+                              helperText: 'Numero attendu : 10 chiffres',
                             ),
                             validator: (value) {
                               final String v = (value ?? '').trim();
-                              if (v.isEmpty || !v.contains('@')) return 'Email invalide';
+                              if (v.isEmpty) {
+                                return 'Renseignez votre email ou votre numero.';
+                              }
+                              if (_isPhoneIdentifier(v)) {
+                                return null;
+                              }
+                              if (!v.contains('@')) {
+                                return 'Email ou numero invalide.';
+                              }
                               return null;
                             },
                           ),

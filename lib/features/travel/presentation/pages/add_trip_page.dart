@@ -385,15 +385,25 @@ class _AddTripPageState extends State<AddTripPage> {
   Future<void> _saveVehicleToUserIfMissing() async {
     final User? authUser = FirebaseAuth.instance.currentUser;
     final String vehicle = _vehicleController.text.trim();
-    if (authUser == null || vehicle.isEmpty || _userHasVehicleStored) return;
+    if (authUser == null) return;
     try {
+      final Map<String, dynamic> patch = <String, dynamic>{
+        'capabilities': <String, dynamic>{
+          'travelProvider': true,
+        },
+      };
+      if (vehicle.isNotEmpty && !_userHasVehicleStored) {
+        patch['vehicleModel'] = vehicle;
+      }
       await _userFirestoreRepository.update(
         authUser.uid,
-        <String, dynamic>{'vehicleModel': vehicle},
+        patch,
       );
       if (!mounted) return;
       setState(() {
-        _userHasVehicleStored = true;
+        if (vehicle.isNotEmpty) {
+          _userHasVehicleStored = true;
+        }
       });
     } catch (_) {
       // Non-blocking: trip remains published even if user profile update fails.

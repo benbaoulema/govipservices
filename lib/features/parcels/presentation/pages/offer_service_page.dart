@@ -1,6 +1,11 @@
+import 'dart:io';
+
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:govipservices/app/router/app_routes.dart';
@@ -8,9 +13,22 @@ import 'package:govipservices/features/parcels/data/vehicle_type_repository.dart
 import 'package:govipservices/features/parcels/domain/models/vehicle_type.dart';
 import 'package:govipservices/features/travel/data/google_places_service.dart';
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
+import 'package:govipservices/features/user/data/user_firestore_repository.dart';
+import 'package:govipservices/features/user/models/app_user.dart';
+import 'package:govipservices/features/user/models/user_phone.dart';
+import 'package:govipservices/features/user/models/user_role.dart';
 import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
+import 'package:image_picker/image_picker.dart';
 
-enum _OfferServiceStep { vehicleType, baseAddress, pricing, personalInfo }
+enum _OfferServiceStep {
+  vehicleType,
+  baseAddress,
+  pricing,
+  personalInfo,
+  vehiclePhoto,
+  maxWeight,
+  description,
+}
 
 enum _PriceUnit { kg, tonne, tricycle, perDelivery }
 
@@ -84,16 +102,23 @@ class _OfferServicePageState extends State<OfferServicePage> {
       String.fromEnvironment('GOOGLE_MAPS_API_KEY');
 
   final VehicleTypeRepository _vehicleTypeRepository = VehicleTypeRepository();
+  final UserFirestoreRepository _userFirestoreRepository =
+      UserFirestoreRepository();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _baseAddressController = TextEditingController();
   final TextEditingController _contactNameController = TextEditingController();
   final TextEditingController _contactPhoneController = TextEditingController();
   final TextEditingController _contactPasswordController =
       TextEditingController();
+  final TextEditingController _maxWeightController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
   final FocusNode _baseAddressFocusNode = FocusNode();
   final FocusNode _contactNameFocusNode = FocusNode();
   final FocusNode _contactPhoneFocusNode = FocusNode();
   final FocusNode _contactPasswordFocusNode = FocusNode();
+  final FocusNode _maxWeightFocusNode = FocusNode();
+  final FocusNode _descriptionFocusNode = FocusNode();
+  final ImagePicker _imagePicker = ImagePicker();
   late final Future<List<VehicleType>> _vehicleTypesFuture;
 
   String? _selectedVehicleTypeId;
@@ -103,10 +128,13 @@ class _OfferServicePageState extends State<OfferServicePage> {
   List<_PriceZoneDraft> _priceZones = const <_PriceZoneDraft>[];
   _PersonalInfoStage _personalInfoStage = _PersonalInfoStage.contact;
   String? _existingLightAccountUid;
+  XFile? _vehiclePhoto;
   bool _isCheckingLightAccount = false;
   bool _canScrollLeft = false;
   bool _canScrollRight = false;
   bool _isResolvingCurrentPosition = false;
+  bool _isPickingVehiclePhoto = false;
+  bool _isSaving = false;
 
   @override
   void initState() {
@@ -131,10 +159,14 @@ class _OfferServicePageState extends State<OfferServicePage> {
     _contactNameController.dispose();
     _contactPhoneController.dispose();
     _contactPasswordController.dispose();
+    _maxWeightController.dispose();
+    _descriptionController.dispose();
     _baseAddressFocusNode.dispose();
     _contactNameFocusNode.dispose();
     _contactPhoneFocusNode.dispose();
     _contactPasswordFocusNode.dispose();
+    _maxWeightFocusNode.dispose();
+    _descriptionFocusNode.dispose();
     super.dispose();
   }
 
@@ -254,6 +286,12 @@ class _OfferServicePageState extends State<OfferServicePage> {
         return _contactNameController.text.trim().isNotEmpty &&
             (!requiresPassword ||
                 _contactPasswordController.text.trim().length >= 6);
+      case _OfferServiceStep.vehiclePhoto:
+        return _vehiclePhoto != null && !_isPickingVehiclePhoto;
+      case _OfferServiceStep.maxWeight:
+        return !_isSaving;
+      case _OfferServiceStep.description:
+        return !_isSaving;
     }
   }
 
@@ -299,6 +337,16 @@ class _OfferServicePageState extends State<OfferServicePage> {
         }
         _contactPhoneFocusNode.requestFocus();
       });
+    } else if (step == _OfferServiceStep.maxWeight) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _maxWeightFocusNode.requestFocus();
+      });
+    } else if (step == _OfferServiceStep.description) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _descriptionFocusNode.requestFocus();
+      });
     }
   }
 
@@ -318,9 +366,16 @@ class _OfferServicePageState extends State<OfferServicePage> {
           _checkExistingLightAccount();
           return;
         }
-        _showMessage(
-          'La suite du formulaire sera branchée sur les prochaines étapes.',
-        );
+        _goToStep(_OfferServiceStep.vehiclePhoto);
+        return;
+      case _OfferServiceStep.vehiclePhoto:
+        _goToStep(_OfferServiceStep.maxWeight);
+        return;
+      case _OfferServiceStep.maxWeight:
+        _goToStep(_OfferServiceStep.description);
+        return;
+      case _OfferServiceStep.description:
+        _submitOffer();
         return;
     }
   }
@@ -348,6 +403,15 @@ class _OfferServicePageState extends State<OfferServicePage> {
           return;
         }
         _goToStep(_OfferServiceStep.pricing);
+        return;
+      case _OfferServiceStep.vehiclePhoto:
+        _goToStep(_OfferServiceStep.personalInfo);
+        return;
+      case _OfferServiceStep.maxWeight:
+        _goToStep(_OfferServiceStep.vehiclePhoto);
+        return;
+      case _OfferServiceStep.description:
+        _goToStep(_OfferServiceStep.maxWeight);
         return;
     }
   }
@@ -514,6 +578,299 @@ class _OfferServicePageState extends State<OfferServicePage> {
     }
   }
 
+  Future<void> _promptVehiclePhotoSource() async {
+    if (_isPickingVehiclePhoto) return;
+
+    final ImageSource? source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: const Text('Prendre une photo'),
+                onTap: () => Navigator.of(context).pop(ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Choisir depuis la galerie'),
+                onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (source == null) return;
+    await _pickVehiclePhoto(source);
+  }
+
+  Future<void> _pickVehiclePhoto(ImageSource source) async {
+    if (_isPickingVehiclePhoto) return;
+
+    setState(() {
+      _isPickingVehiclePhoto = true;
+    });
+
+    try {
+      final XFile? pickedFile = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 82,
+        maxWidth: 1800,
+      );
+      if (pickedFile == null || !mounted) return;
+
+      setState(() {
+        _vehiclePhoto = pickedFile;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      _showMessage('Impossible d ajouter cette photo pour le moment.');
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isPickingVehiclePhoto = false;
+      });
+    }
+  }
+
+  void _removeVehiclePhoto() {
+    setState(() {
+      _vehiclePhoto = null;
+    });
+  }
+
+  String _buildSyntheticEmailFromPhone(String phoneNumber) {
+    return '225$phoneNumber@govipuser.local';
+  }
+
+  String _priceUnitValue(_PriceUnit unit) {
+    switch (unit) {
+      case _PriceUnit.kg:
+        return 'kg';
+      case _PriceUnit.tonne:
+        return 'tonne';
+      case _PriceUnit.tricycle:
+        return 'tricycle';
+      case _PriceUnit.perDelivery:
+        return 'per_delivery';
+    }
+  }
+
+  String _currencyValue(_PriceZoneCurrency currency) {
+    switch (currency) {
+      case _PriceZoneCurrency.xof:
+        return 'XOF';
+      case _PriceZoneCurrency.eur:
+        return 'EUR';
+    }
+  }
+
+  double? get _maxWeightValue {
+    final String raw = _maxWeightController.text.trim();
+    if (raw.isEmpty) return null;
+    return double.tryParse(raw.replaceAll(',', '.'));
+  }
+
+  Future<String> _ensureOfferOwnerUid() async {
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    final String displayName = _contactNameController.text.trim();
+    final String phone = _contactPhoneController.text.trim();
+
+    if (currentUser != null) {
+      if ((currentUser.displayName ?? '').trim() != displayName &&
+          displayName.isNotEmpty) {
+        await currentUser.updateDisplayName(displayName);
+      }
+
+      await _userFirestoreRepository.update(currentUser.uid, <String, dynamic>{
+        'displayName': displayName,
+        'role': userRoleToJson(UserRole.pro),
+        'phone': <String, dynamic>{
+          'countryCode': '+225',
+          'number': phone,
+        },
+        'service': displayName,
+        'isServiceProvider': true,
+        'capabilities': <String, dynamic>{
+          'parcelsProvider': true,
+        },
+        'meta': <String, dynamic>{
+          'offerFlowCompleted': true,
+        },
+      });
+      return currentUser.uid;
+    }
+
+    if (_existingLightAccountUid != null) {
+      await _userFirestoreRepository.update(_existingLightAccountUid!, <String, dynamic>{
+        'displayName': displayName,
+        'role': userRoleToJson(UserRole.pro),
+        'phone': <String, dynamic>{
+          'countryCode': '+225',
+          'number': phone,
+        },
+        'service': displayName,
+        'isServiceProvider': true,
+        'capabilities': <String, dynamic>{
+          'parcelsProvider': true,
+        },
+        'meta': <String, dynamic>{
+          'offerFlowCompleted': true,
+          'authEmailSource': 'phone-generated',
+        },
+      });
+      return _existingLightAccountUid!;
+    }
+
+    final UserCredential credentials =
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      email: _buildSyntheticEmailFromPhone(phone),
+      password: _contactPasswordController.text.trim(),
+    );
+    final User? authUser = credentials.user;
+    if (authUser == null) {
+      throw FirebaseAuthException(
+        code: 'null-user',
+        message: 'Compte leger introuvable apres creation.',
+      );
+    }
+
+    await authUser.updateDisplayName(displayName);
+
+    final AppUser user = AppUser(
+      uid: authUser.uid,
+      email: authUser.email,
+      displayName: displayName,
+      role: UserRole.pro,
+      phone: const UserPhone(countryCode: '+225', number: ''),
+      photoURL: authUser.photoURL,
+      materialPhotoUrl: null,
+      service: displayName,
+      isServiceProvider: true,
+      createdAt: null,
+      updatedAt: null,
+      archived: false,
+      meta: <String, dynamic>{
+        'authEmailSource': 'phone-generated',
+        'offerFlowCompleted': true,
+      },
+    ).copyWith(
+      phone: UserPhone(countryCode: '+225', number: phone),
+    );
+
+    await _userFirestoreRepository.setUser(authUser.uid, user);
+    await _userFirestoreRepository.update(authUser.uid, <String, dynamic>{
+      'capabilities': <String, dynamic>{
+        'parcelsProvider': true,
+      },
+    });
+    return authUser.uid;
+  }
+
+  Future<Map<String, String?>> _uploadVehiclePhoto(String ownerUid) async {
+    final XFile? photo = _vehiclePhoto;
+    if (photo == null) {
+      return <String, String?>{
+        'photoUrl': null,
+        'storagePath': null,
+      };
+    }
+
+    final String fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final String storagePath = 'service_materials/$ownerUid/$fileName';
+    final Reference ref = FirebaseStorage.instance.ref(storagePath);
+    await ref.putFile(File(photo.path));
+    final String url = await ref.getDownloadURL();
+    return <String, String?>{
+      'photoUrl': url,
+      'storagePath': storagePath,
+    };
+  }
+
+  Future<void> _submitOffer() async {
+    if (_isSaving) return;
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      final String ownerUid = await _ensureOfferOwnerUid();
+      final Map<String, String?> photoData = await _uploadVehiclePhoto(ownerUid);
+      final VehicleType? selectedVehicleType = await _vehicleTypesFuture.then(
+        _findSelectedVehicleType,
+      );
+      final String title = _contactNameController.text.trim();
+
+      await FirebaseFirestore.instance.collection('services').add(<String, dynamic>{
+        'title': title,
+        'name': title,
+        'ownerUid': ownerUid,
+        'contactName': title,
+        'contactPhone': _contactPhoneController.text.trim(),
+        'cityName': _baseAddress.address,
+        'pickupCityAddress': _baseAddress.address,
+        'pickupLatLng': <String, dynamic>{
+          'lat': _baseAddress.lat,
+          'lng': _baseAddress.lng,
+        },
+        'priceUnit': _priceUnitValue(_priceUnit),
+        'priceZones': _priceZones
+            .map(
+              (_PriceZoneDraft zone) => <String, dynamic>{
+                'departZone': zone.departZone,
+                'arrivZone': zone.arrivZone,
+                'price': zone.price,
+                'device': _currencyValue(zone.currency),
+                'schedules': null,
+              },
+            )
+            .toList(growable: false),
+        'maxWeight': _maxWeightValue,
+        'description': _descriptionController.text.trim().isEmpty
+            ? null
+            : _descriptionController.text.trim(),
+        'photoUrl': photoData['photoUrl'],
+        'photoStoragePath': photoData['storagePath'],
+        'typeVehicule': selectedVehicleType == null
+            ? null
+            : <String, dynamic>{
+                'id': selectedVehicleType.id,
+                'name': selectedVehicleType.name,
+                'imageUrl': selectedVehicleType.imageUrl,
+              },
+        'isValidated': false,
+        'status': 'active',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+      _showMessage('Service enregistre avec succes.');
+      Navigator.of(context).maybePop(true);
+    } on FirebaseAuthException catch (error) {
+      if (!mounted) return;
+      _showMessage(error.message ?? 'Impossible de creer le compte leger.');
+    } on FirebaseException catch (error) {
+      if (!mounted) return;
+      _showMessage(error.message ?? 'Impossible d enregistrer le service.');
+    } catch (_) {
+      if (!mounted) return;
+      _showMessage('Impossible d enregistrer le service pour le moment.');
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+      });
+    }
+  }
+
   void _setPriceUnit(_PriceUnit value) {
     if (_priceUnit == value) return;
     setState(() {
@@ -648,6 +1005,57 @@ class _OfferServicePageState extends State<OfferServicePage> {
                                       );
                                     },
                                   )
+                                : _currentStep == _OfferServiceStep.vehiclePhoto
+                                    ? _VehiclePhotoStep(
+                                        key: const ValueKey(
+                                          'vehicle-photo-step',
+                                        ),
+                                        photo: _vehiclePhoto,
+                                        isPicking: _isPickingVehiclePhoto,
+                                        onPickPhoto:
+                                            _promptVehiclePhotoSource,
+                                        onRemovePhoto: _removeVehiclePhoto,
+                                      )
+                                : _currentStep == _OfferServiceStep.maxWeight
+                                    ? _OptionalTextStep(
+                                        key: const ValueKey('max-weight-step'),
+                                        title: 'Quel poids maximal acceptez-vous ?',
+                                        subtitle:
+                                            'Vous pouvez renseigner une limite indicative ou passer cette etape.',
+                                        controller: _maxWeightController,
+                                        focusNode: _maxWeightFocusNode,
+                                        hint: 'Ex: 150',
+                                        keyboardType: const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                        maxLines: 1,
+                                        suffixText: 'kg',
+                                        skipLabel: 'Ignorer cette information',
+                                        onSkip: () {
+                                          _maxWeightController.clear();
+                                          _handleContinue();
+                                        },
+                                      )
+                                : _currentStep == _OfferServiceStep.description
+                                    ? _OptionalTextStep(
+                                        key: const ValueKey('description-step'),
+                                        title: 'Ajoutez une description',
+                                        subtitle:
+                                            'Precisez votre service, vos habitudes ou un detail utile. Cette etape peut aussi etre ignoree.',
+                                        controller: _descriptionController,
+                                        focusNode: _descriptionFocusNode,
+                                        hint:
+                                            'Ex: Livraisons express, manutention legere, disponibilite 7j/7',
+                                        keyboardType: TextInputType.multiline,
+                                        maxLines: 5,
+                                        skipLabel: 'Ignorer cette etape',
+                                        onSkip: () {
+                                          _descriptionController.clear();
+                                          FocusManager.instance.primaryFocus
+                                              ?.unfocus();
+                                          setState(() {});
+                                        },
+                                      )
                                 : _currentStep == _OfferServiceStep.personalInfo
                                     ? _PersonalInfoStep(
                                         key: const ValueKey(
@@ -710,6 +1118,7 @@ class _OfferServicePageState extends State<OfferServicePage> {
               _BottomNavigationBar(
                 currentStep: _currentStep,
                 canContinue: _canContinue,
+                isSaving: _isSaving,
                 onBack: _handleBack,
                 onContinue: _handleContinue,
               ),
@@ -817,12 +1226,14 @@ class _BottomNavigationBar extends StatelessWidget {
   const _BottomNavigationBar({
     required this.currentStep,
     required this.canContinue,
+    required this.isSaving,
     required this.onBack,
     required this.onContinue,
   });
 
   final _OfferServiceStep currentStep;
   final bool canContinue;
+  final bool isSaving;
   final VoidCallback onBack;
   final VoidCallback onContinue;
 
@@ -837,36 +1248,309 @@ class _BottomNavigationBar extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
-          child: Row(
-            children: [
-              if (currentStep != _OfferServiceStep.vehicleType) ...[
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: onBack,
-                    child: const Text('Retour'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-              ],
-              Expanded(
-                flex: 2,
-                child: currentStep == _OfferServiceStep.vehicleType
-                    ? const SizedBox.shrink()
-                    : FilledButton(
-                        onPressed: canContinue ? onContinue : null,
-                        child: Text(
-                          currentStep == _OfferServiceStep.baseAddress
-                              ? 'Continuer'
-                              : 'Continuer ensuite',
-                        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (isSaving)
+              const LinearProgressIndicator(
+                minHeight: 3,
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+              child: Row(
+                children: [
+                  if (currentStep != _OfferServiceStep.vehicleType) ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: isSaving ? null : onBack,
+                        child: const Text('Retour'),
                       ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(
+                    flex: 2,
+                    child: currentStep == _OfferServiceStep.vehicleType
+                        ? const SizedBox.shrink()
+                        : FilledButton(
+                            onPressed:
+                                canContinue && !isSaving ? onContinue : null,
+                            child: isSaving
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Text(
+                                    currentStep == _OfferServiceStep.description
+                                        ? 'Enregistrer'
+                                        : currentStep ==
+                                                    _OfferServiceStep
+                                                        .baseAddress ||
+                                                currentStep ==
+                                                    _OfferServiceStep
+                                                        .personalInfo ||
+                                                currentStep ==
+                                                    _OfferServiceStep
+                                                        .vehiclePhoto ||
+                                                currentStep ==
+                                                    _OfferServiceStep.maxWeight
+                                        ? 'Continuer'
+                                        : 'Continuer ensuite',
+                                  ),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VehiclePhotoStep extends StatelessWidget {
+  const _VehiclePhotoStep({
+    required super.key,
+    required this.photo,
+    required this.isPicking,
+    required this.onPickPhoto,
+    required this.onRemovePhoto,
+  });
+
+  final XFile? photo;
+  final bool isPicking;
+  final VoidCallback onPickPhoto;
+  final VoidCallback onRemovePhoto;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme colorScheme = theme.colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Ajoutez une photo de votre engin',
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: const Color(0xFF0F172A),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Prenez une photo nette ou choisissez-en une depuis votre galerie.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: const Color(0xFF475569),
+            height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 18),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(22),
+                  child: AspectRatio(
+                    aspectRatio: 4 / 3,
+                    child: photo == null
+                        ? DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: <Color>[
+                                  colorScheme.primary.withOpacity(0.10),
+                                  const Color(0xFFF8FAFC),
+                                ],
+                              ),
+                            ),
+                            child: Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  Icon(
+                                    Icons.add_a_photo_outlined,
+                                    size: 44,
+                                    color: colorScheme.primary,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    'Aucune photo pour le moment',
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                          color: const Color(0xFF0F172A),
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : Image.file(
+                            File(photo!.path),
+                            fit: BoxFit.cover,
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: isPicking ? null : onPickPhoto,
+                    icon: isPicking
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            photo == null
+                                ? Icons.add_a_photo_outlined
+                                : Icons.autorenew_rounded,
+                          ),
+                    label: Text(
+                      photo == null
+                          ? 'Prendre ou choisir une photo'
+                          : 'Changer la photo',
+                    ),
+                  ),
+                ),
+                if (photo != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.center,
+                    child: TextButton.icon(
+                      onPressed: isPicking ? null : onRemovePhoto,
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      label: const Text('Retirer la photo'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
-      ),
+      ],
+    );
+  }
+}
+
+class _OptionalTextStep extends StatelessWidget {
+  const _OptionalTextStep({
+    required super.key,
+    required this.title,
+    required this.subtitle,
+    required this.controller,
+    required this.focusNode,
+    required this.hint,
+    required this.keyboardType,
+    required this.maxLines,
+    required this.skipLabel,
+    required this.onSkip,
+    this.suffixText,
+  });
+
+  final String title;
+  final String subtitle;
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final String hint;
+  final TextInputType keyboardType;
+  final int maxLines;
+  final String skipLabel;
+  final VoidCallback onSkip;
+  final String? suffixText;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          title,
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: const Color(0xFF0F172A),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          subtitle,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: const Color(0xFF475569),
+            height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 18),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  keyboardType: keyboardType,
+                  maxLines: maxLines,
+                  decoration: _editorInputDecoration(
+                    context,
+                    label: title,
+                    hint: hint,
+                    icon: maxLines == 1
+                        ? Icons.scale_outlined
+                        : Icons.notes_rounded,
+                    suffixText: suffixText,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: onSkip,
+                    child: Text(skipLabel),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1972,12 +2656,14 @@ InputDecoration _editorInputDecoration(
   required IconData icon,
   String? prefixText,
   String? helperText,
+  String? suffixText,
 }) {
   return InputDecoration(
     labelText: label,
     hintText: hint,
     prefixText: prefixText,
     helperText: helperText,
+    suffixText: suffixText,
     filled: true,
     fillColor: const Color(0xFFF4FBF7),
     prefixIcon: Icon(icon),
