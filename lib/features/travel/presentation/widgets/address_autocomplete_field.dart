@@ -15,6 +15,7 @@ class AddressAutocompleteField extends StatefulWidget {
     this.onPlaceResolved,
     this.focusNode,
     this.countries = const <String>['ci', 'fr'],
+    this.suggestionTypes = 'geocode',
     super.key,
   });
 
@@ -27,6 +28,7 @@ class AddressAutocompleteField extends StatefulWidget {
   final ValueChanged<PlaceDetailsResult>? onPlaceResolved;
   final FocusNode? focusNode;
   final List<String> countries;
+  final String? suggestionTypes;
 
   @override
   State<AddressAutocompleteField> createState() => _AddressAutocompleteFieldState();
@@ -117,6 +119,7 @@ class _AddressAutocompleteFieldState extends State<AddressAutocompleteField>
         input: query,
         sessionToken: _sessionToken,
         countries: widget.countries,
+        types: widget.suggestionTypes,
       );
       if (!mounted) return;
       setState(() {

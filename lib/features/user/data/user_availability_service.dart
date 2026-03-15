@@ -32,6 +32,54 @@ class UserAvailabilitySnapshot {
 }
 
 class UserAvailabilityService {
+  static String encodeGeohashForCoordinates(
+    double latitude,
+    double longitude, {
+    int precision = 9,
+  }) {
+    const String base32 = '0123456789bcdefghjkmnpqrstuvwxyz';
+    final List<double> latRange = <double>[-90, 90];
+    final List<double> lngRange = <double>[-180, 180];
+    final StringBuffer hash = StringBuffer();
+
+    bool isEvenBit = true;
+    int bit = 0;
+    int currentChar = 0;
+
+    while (hash.length < precision) {
+      if (isEvenBit) {
+        final double mid = (lngRange[0] + lngRange[1]) / 2;
+        if (longitude >= mid) {
+          currentChar = (currentChar << 1) + 1;
+          lngRange[0] = mid;
+        } else {
+          currentChar <<= 1;
+          lngRange[1] = mid;
+        }
+      } else {
+        final double mid = (latRange[0] + latRange[1]) / 2;
+        if (latitude >= mid) {
+          currentChar = (currentChar << 1) + 1;
+          latRange[0] = mid;
+        } else {
+          currentChar <<= 1;
+          latRange[1] = mid;
+        }
+      }
+
+      isEvenBit = !isEvenBit;
+      bit++;
+
+      if (bit == 5) {
+        hash.write(base32[currentChar]);
+        bit = 0;
+        currentChar = 0;
+      }
+    }
+
+    return hash.toString();
+  }
+
   UserAvailabilityService({
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
@@ -59,7 +107,7 @@ class UserAvailabilityService {
         await _firestore.collection('users').doc(user.uid).get();
     final UserAvailabilitySnapshot current =
         _snapshotFromUserData(snapshot.data());
-    final String geohash = _encodeGeohash(
+    final String geohash = encodeGeohashForCoordinates(
       position.latitude,
       position.longitude,
     );
@@ -81,6 +129,14 @@ class UserAvailabilityService {
     await _firestore.collection('users').doc(user.uid).set(
       <String, dynamic>{'availability': availability},
       SetOptions(merge: true),
+    );
+    await _syncParcelServicesSearch(
+      uid: user.uid,
+      isOnline: true,
+      scope: scope,
+      lat: position.latitude,
+      lng: position.longitude,
+      geohash: geohash,
     );
 
     return UserAvailabilitySnapshot(
@@ -110,6 +166,14 @@ class UserAvailabilityService {
         },
       },
       SetOptions(merge: true),
+    );
+    await _syncParcelServicesSearch(
+      uid: user.uid,
+      isOnline: false,
+      scope: current.scope,
+      lat: current.lat,
+      lng: current.lng,
+      geohash: current.geohash,
     );
     return UserAvailabilitySnapshot(
       isOnline: false,
@@ -216,51 +280,53 @@ class UserAvailabilityService {
     );
   }
 
-  String _encodeGeohash(
-    double latitude,
-    double longitude, {
-    int precision = 9,
-  }) {
-    const String base32 = '0123456789bcdefghjkmnpqrstuvwxyz';
-    final List<double> latRange = <double>[-90, 90];
-    final List<double> lngRange = <double>[-180, 180];
-    final StringBuffer hash = StringBuffer();
+  Future<void> _syncParcelServicesSearch({
+    required String uid,
+    required bool isOnline,
+    required UserAvailabilityScope scope,
+    required double? lat,
+    required double? lng,
+    required String? geohash,
+  }) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot =
+        await _firestore
+            .collection('services')
+            .where('ownerUid', isEqualTo: uid)
+            .where('status', isEqualTo: 'active')
+            .get();
 
-    bool isEvenBit = true;
-    int bit = 0;
-    int currentChar = 0;
+    if (snapshot.docs.isEmpty) return;
 
-    while (hash.length < precision) {
-      if (isEvenBit) {
-        final double mid = (lngRange[0] + lngRange[1]) / 2;
-        if (longitude >= mid) {
-          currentChar = (currentChar << 1) + 1;
-          lngRange[0] = mid;
-        } else {
-          currentChar <<= 1;
-          lngRange[1] = mid;
-        }
-      } else {
-        final double mid = (latRange[0] + latRange[1]) / 2;
-        if (latitude >= mid) {
-          currentChar = (currentChar << 1) + 1;
-          latRange[0] = mid;
-        } else {
-          currentChar <<= 1;
-          latRange[1] = mid;
-        }
-      }
+    final WriteBatch batch = _firestore.batch();
+    final bool searchable =
+        isOnline &&
+        (scope == UserAvailabilityScope.parcels ||
+            scope == UserAvailabilityScope.all);
 
-      isEvenBit = !isEvenBit;
-      bit++;
-
-      if (bit == 5) {
-        hash.write(base32[currentChar]);
-        bit = 0;
-        currentChar = 0;
-      }
+    for (final QueryDocumentSnapshot<Map<String, dynamic>> doc in snapshot.docs) {
+      batch.set(doc.reference, <String, dynamic>{
+        'search': <String, dynamic>{
+          'isSearchable': searchable,
+          'serviceStatus': 'active',
+          'ownerOnline': isOnline,
+          'ownerScope': _scopeToStorage(scope),
+          'ownerLat': lat,
+          'ownerLng': lng,
+          'ownerGeohash': geohash,
+          'ownerAvailabilityUpdatedAt': FieldValue.serverTimestamp(),
+        },
+        'ownerAvailability': <String, dynamic>{
+          'isOnline': isOnline,
+          'scope': _scopeToStorage(scope),
+          'lat': lat,
+          'lng': lng,
+          'geohash': geohash,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     }
 
-    return hash.toString();
+    await batch.commit();
   }
 }

@@ -1,7 +1,5 @@
 import 'dart:io';
 
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -14,6 +12,7 @@ import 'package:govipservices/features/parcels/domain/models/vehicle_type.dart';
 import 'package:govipservices/features/travel/data/google_places_service.dart';
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
 import 'package:govipservices/features/user/data/user_firestore_repository.dart';
+import 'package:govipservices/features/user/data/user_availability_service.dart';
 import 'package:govipservices/features/user/models/app_user.dart';
 import 'package:govipservices/features/user/models/user_phone.dart';
 import 'package:govipservices/features/user/models/user_role.dart';
@@ -807,6 +806,18 @@ class _OfferServicePageState extends State<OfferServicePage> {
         _findSelectedVehicleType,
       );
       final String title = _contactNameController.text.trim();
+      final UserAvailabilitySnapshot availability =
+          await UserAvailabilityService().fetchCurrent();
+      final String? pickupGeohash =
+          _baseAddress.lat != null && _baseAddress.lng != null
+              ? UserAvailabilityService.encodeGeohashForCoordinates(
+                  _baseAddress.lat!,
+                  _baseAddress.lng!,
+                )
+              : null;
+      final bool isSearchable = availability.isOnline &&
+          (availability.scope == UserAvailabilityScope.parcels ||
+              availability.scope == UserAvailabilityScope.all);
 
       await FirebaseFirestore.instance.collection('services').add(<String, dynamic>{
         'title': title,
@@ -820,6 +831,7 @@ class _OfferServicePageState extends State<OfferServicePage> {
           'lat': _baseAddress.lat,
           'lng': _baseAddress.lng,
         },
+        'pickupGeohash': pickupGeohash,
         'priceUnit': _priceUnitValue(_priceUnit),
         'priceZones': _priceZones
             .map(
@@ -847,6 +859,25 @@ class _OfferServicePageState extends State<OfferServicePage> {
               },
         'isValidated': false,
         'status': 'active',
+        'ownerAvailability': <String, dynamic>{
+          'isOnline': availability.isOnline,
+          'scope': availability.scope.name,
+          'lat': availability.lat,
+          'lng': availability.lng,
+          'geohash': availability.geohash,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        'search': <String, dynamic>{
+          'isSearchable': isSearchable,
+          'serviceStatus': 'active',
+          'isValidated': false,
+          'ownerOnline': availability.isOnline,
+          'ownerScope': availability.scope.name,
+          'ownerLat': availability.lat,
+          'ownerLng': availability.lng,
+          'ownerGeohash': availability.geohash,
+          'ownerAvailabilityUpdatedAt': FieldValue.serverTimestamp(),
+        },
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });

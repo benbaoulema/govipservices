@@ -38,6 +38,7 @@ class GooglePlacesAutocompleteService {
     required String input,
     required String sessionToken,
     List<String> countries = const <String>['ci', 'fr'],
+    String? types = 'geocode',
   }) async {
     if (apiKey.isEmpty || input.trim().isEmpty) {
       return const <PlaceSuggestion>[];
@@ -51,8 +52,8 @@ class GooglePlacesAutocompleteService {
         'input': input.trim(),
         'key': apiKey,
         'language': language,
-        'types': 'geocode',
         'sessiontoken': sessionToken,
+        if (types != null && types.trim().isNotEmpty) 'types': types.trim(),
         if (components.isNotEmpty) 'components': components,
       },
     );

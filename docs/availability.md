@@ -106,12 +106,44 @@ Choix actuel :
 - pas de listener Firestore
 - pas de tracking continu permanent
 - refresh ponctuel au retour foreground de l'application
+- propagation ponctuelle de la disponibilite vers les `services` actifs du proprietaire
 
 But :
 
 - limiter cout Firebase
 - limiter consommation batterie
 - garder une semantics "presence recente" plutot qu'un tracking temps reel lourd
+- permettre au matching colis de requeter directement `services`
+
+## Propagation vers `services`
+
+Quand l'utilisateur passe en ligne ou hors ligne, le service Flutter met a jour tous les documents :
+
+- `services` avec `ownerUid == uid`
+- `status == active`
+
+Champs mis a jour :
+
+- `ownerAvailability.isOnline`
+- `ownerAvailability.scope`
+- `ownerAvailability.lat`
+- `ownerAvailability.lng`
+- `ownerAvailability.geohash`
+- `ownerAvailability.updatedAt`
+- `search.isSearchable`
+- `search.serviceStatus`
+- `search.ownerOnline`
+- `search.ownerScope`
+- `search.ownerLat`
+- `search.ownerLng`
+- `search.ownerGeohash`
+- `search.ownerAvailabilityUpdatedAt`
+
+Regle actuelle :
+
+- `search.isSearchable = true` seulement si :
+  - l'utilisateur est en ligne
+  - et le scope vaut `parcels` ou `all`
 
 ## Limitations actuelles
 
