@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/features/notifications/data/firestore_notifications_repository.dart';
 import 'package:govipservices/features/notifications/domain/models/app_notification.dart';
 import 'package:govipservices/features/travel/domain/travel_service.dart';
@@ -50,7 +51,6 @@ class TravelRepository implements TravelService {
           firestore: firestore ?? FirebaseFirestore.instance,
         );
 
-  static const String _googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
   final FirebaseFirestore _firestore;
   final FirestoreNotificationsRepository _notificationsRepository;
 
@@ -580,7 +580,7 @@ class TravelRepository implements TravelService {
     required double destinationLat,
     required double destinationLng,
   }) async {
-    if (_googleMapsApiKey.trim().isEmpty) return null;
+    if (RuntimeAppConfig.googleMapsApiKey.trim().isEmpty) return null;
     final Uri uri = Uri.https(
       'maps.googleapis.com',
       '/maps/api/directions/json',
@@ -590,7 +590,7 @@ class TravelRepository implements TravelService {
         'mode': 'driving',
         'departure_time': '${DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000}',
         'traffic_model': 'best_guess',
-        'key': _googleMapsApiKey,
+        'key': RuntimeAppConfig.googleMapsApiKey,
       },
     );
 

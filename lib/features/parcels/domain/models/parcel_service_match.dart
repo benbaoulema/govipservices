@@ -12,6 +12,7 @@ class ParcelServiceMatch {
     required this.distanceToPickupMeters,
     required this.priorityRank,
     required this.vehicleLabel,
+    this.ownerCity,
   });
 
   final String serviceId;
@@ -26,6 +27,9 @@ class ParcelServiceMatch {
   final double distanceToPickupMeters;
   final int priorityRank;
   final String vehicleLabel;
+  /// Ville actuelle du livreur (issue du géocodage inverse lors de la mise en ligne).
+  /// Non null uniquement pour les rank 2 (zone couverte mais livreur loin).
+  final String? ownerCity;
 
-  bool get isNearby => priorityRank == 1 || priorityRank == 2;
+  bool get isNearby => priorityRank == 1 || priorityRank == 3;
 }

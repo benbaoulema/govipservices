@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/features/travel/data/google_places_service.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
@@ -17,7 +18,7 @@ class EditTripPage extends StatefulWidget {
 }
 
 class _EditTripPageState extends State<EditTripPage> {
-  static const String _googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
+  String get _googleMapsApiKey => RuntimeAppConfig.googleMapsApiKey;
 
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TravelRepository _travelRepository = TravelRepository();

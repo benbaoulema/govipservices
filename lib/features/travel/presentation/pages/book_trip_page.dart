@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
@@ -25,7 +26,7 @@ class BookTripPage extends StatefulWidget {
 }
 
 class _BookTripPageState extends State<BookTripPage> {
-  static const String _googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
+  String get _googleMapsApiKey => RuntimeAppConfig.googleMapsApiKey;
 
   final TravelRepository _travelRepository = TravelRepository();
   final TextEditingController _departureController = TextEditingController();

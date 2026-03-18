@@ -1,14 +1,31 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:govipservices/app/config/runtime_app_config.dart';
+import 'package:govipservices/app/router/app_routes.dart';
+import 'package:govipservices/features/parcels/data/parcel_request_service.dart';
 import 'package:govipservices/features/parcels/data/parcel_route_preview_service.dart';
 import 'package:govipservices/features/parcels/data/parcel_service_matcher.dart';
 import 'package:govipservices/features/parcels/domain/models/parcel_service_match.dart';
+import 'package:govipservices/features/parcels/domain/models/parcel_request_models.dart';
 import 'package:govipservices/features/travel/data/google_places_service.dart';
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
+import 'package:govipservices/features/user/data/user_firestore_repository.dart';
+import 'package:govipservices/features/user/models/app_user.dart';
+import 'package:govipservices/features/user/models/user_phone.dart';
+import 'package:govipservices/features/user/models/user_role.dart';
 
+
+part 'ship_package_step_widgets.dart';
+part 'ship_package_address_sheet.dart';
+part 'ship_package_match_card.dart';
 enum _ShipStep { request, matches, recipient }
 
 class _AddressPoint {
@@ -43,6 +60,20 @@ class _AddressPoint {
   }
 }
 
+class _RequesterIdentity {
+  const _RequesterIdentity({
+    required this.uid,
+    required this.name,
+    required this.contact,
+  });
+
+  final String uid;
+  final String name;
+  final String contact;
+}
+
+enum _RequesterAction { login, lightAccount }
+
 class ShipPackagePage extends StatefulWidget {
   const ShipPackagePage({super.key});
 
@@ -51,8 +82,7 @@ class ShipPackagePage extends StatefulWidget {
 }
 
 class _ShipPackagePageState extends State<ShipPackagePage> {
-  static const String _googleMapsApiKey =
-      String.fromEnvironment('GOOGLE_MAPS_API_KEY');
+  String get _googleMapsApiKey => RuntimeAppConfig.googleMapsApiKey;
 
   final PageController _pageController = PageController();
   final TextEditingController _pickupController = TextEditingController();
@@ -65,7 +95,10 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
   final FocusNode _deliveryFocusNode = FocusNode();
   final FocusNode _recipientNameFocusNode = FocusNode();
   final FocusNode _recipientPhoneFocusNode = FocusNode();
+  final ParcelRequestService _parcelRequestService = ParcelRequestService();
   final ParcelServiceMatcher _parcelServiceMatcher = ParcelServiceMatcher();
+  final UserFirestoreRepository _userFirestoreRepository =
+      UserFirestoreRepository();
   late final ParcelRoutePreviewService _routePreviewService;
 
   GoogleMapController? _mapController;
@@ -76,11 +109,20 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
   List<ParcelServiceMatch> _matches = const <ParcelServiceMatch>[];
   ParcelServiceMatch? _selectedMatch;
   bool _hasSearchedMatches = false;
-  bool _matchesOverlayHidden = false;
   bool _isFetchingPickupLocation = false;
   bool _isSearchingMatches = false;
+  bool _isCreatingParcelRequest = false;
   bool _isSubmitting = false;
+  String? _orderingServiceId;
   int _routeRequestSerial = 0;
+  String? _routeDurationText;
+
+  BitmapDescriptor? _pickupIcon;
+  BitmapDescriptor? _deliveryIcon;
+
+  final TextEditingController _noteController = TextEditingController();
+  final TextEditingController _weightController = TextEditingController();
+  DateTime? _maxDeliveryDate;
 
   @override
   void initState() {
@@ -90,6 +132,34 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     _recipientPhoneController.addListener(_handleRecipientChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _useCurrentLocationForPickup();
+      _loadMarkerIcons();
+    });
+  }
+
+  Future<BitmapDescriptor> _emojiToBitmap(String emoji, double fontSize) async {
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder);
+    final TextPainter tp = TextPainter(textDirection: TextDirection.ltr)
+      ..text = TextSpan(text: emoji, style: TextStyle(fontSize: fontSize))
+      ..layout();
+    tp.paint(canvas, Offset.zero);
+    final ui.Image img = await recorder
+        .endRecording()
+        .toImage(tp.width.ceil(), tp.height.ceil());
+    final ByteData? data =
+        await img.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
+  }
+
+  Future<void> _loadMarkerIcons() async {
+    final List<BitmapDescriptor> icons = await Future.wait(<Future<BitmapDescriptor>>[
+      _emojiToBitmap('📦', 42),
+      _emojiToBitmap('🏍️📦', 36),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _pickupIcon = icons[0];
+      _deliveryIcon = icons[1];
     });
   }
 
@@ -108,6 +178,8 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     _deliveryFocusNode.dispose();
     _recipientNameFocusNode.dispose();
     _recipientPhoneFocusNode.dispose();
+    _noteController.dispose();
+    _weightController.dispose();
     super.dispose();
   }
 
@@ -135,62 +207,6 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     if (_currentStep == _ShipStep.request) return true;
     _goToStep(_ShipStep.values[_currentStepIndex - 1]);
     return false;
-  }
-
-  void _handlePickupTextChanged(String value) {
-    setState(() {
-      _pickup = _pickup.copyWith(address: value, clearCoords: true);
-      _matches = const <ParcelServiceMatch>[];
-      _selectedMatch = null;
-      _hasSearchedMatches = false;
-      _matchesOverlayHidden = false;
-    });
-  }
-
-  void _handleDeliveryTextChanged(String value) {
-    setState(() {
-      _delivery = _delivery.copyWith(address: value, clearCoords: true);
-      _matches = const <ParcelServiceMatch>[];
-      _selectedMatch = null;
-      _hasSearchedMatches = false;
-      _matchesOverlayHidden = false;
-    });
-  }
-
-  void _applyPickupDetails(PlaceDetailsResult details) {
-    setState(() {
-      _pickup = _pickup.copyWith(
-        address: details.address,
-        lat: details.lat,
-        lng: details.lng,
-        placeId: details.placeId,
-      );
-      _matches = const <ParcelServiceMatch>[];
-      _selectedMatch = null;
-      _hasSearchedMatches = false;
-      _matchesOverlayHidden = false;
-    });
-    _refreshRoutePreview();
-    _refreshRequestMapViewport();
-    _triggerAutoSearchIfReady();
-  }
-
-  void _applyDeliveryDetails(PlaceDetailsResult details) {
-    setState(() {
-      _delivery = _delivery.copyWith(
-        address: details.address,
-        lat: details.lat,
-        lng: details.lng,
-        placeId: details.placeId,
-      );
-      _matches = const <ParcelServiceMatch>[];
-      _selectedMatch = null;
-      _hasSearchedMatches = false;
-      _matchesOverlayHidden = false;
-    });
-    _refreshRoutePreview();
-    _refreshRequestMapViewport();
-    _triggerAutoSearchIfReady();
   }
 
   Future<void> _openDeliverySearchSheet() async {
@@ -227,7 +243,6 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       _matches = const <ParcelServiceMatch>[];
       _selectedMatch = null;
       _hasSearchedMatches = false;
-      _matchesOverlayHidden = false;
     });
     _refreshRoutePreview();
     _refreshRequestMapViewport();
@@ -268,7 +283,6 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       _matches = const <ParcelServiceMatch>[];
       _selectedMatch = null;
       _hasSearchedMatches = false;
-      _matchesOverlayHidden = false;
     });
     _refreshRoutePreview();
     _refreshRequestMapViewport();
@@ -285,7 +299,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       context: context,
       barrierLabel: 'Recherche adresse',
       barrierDismissible: true,
-      barrierColor: Colors.black.withOpacity(0.12),
+      barrierColor: Colors.black.withValues(alpha: 0.12),
       transitionDuration: const Duration(milliseconds: 420),
       pageBuilder: (BuildContext context, _, __) {
         return _AddressSearchSheetRoute(
@@ -379,8 +393,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         _matches = const <ParcelServiceMatch>[];
         _selectedMatch = null;
         _hasSearchedMatches = false;
-        _matchesOverlayHidden = false;
-      });
+        });
       _showMessage('Adresse de récupération renseignée depuis votre position.');
       _refreshRoutePreview();
       _refreshRequestMapViewport();
@@ -435,7 +448,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
           markerId: const MarkerId('pickup'),
           position: LatLng(_pickup.lat!, _pickup.lng!),
           infoWindow: const InfoWindow(title: 'Départ'),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          icon: _pickupIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
         ),
       );
     }
@@ -445,7 +458,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
           markerId: const MarkerId('delivery'),
           position: LatLng(_delivery.lat!, _delivery.lng!),
           infoWindow: const InfoWindow(title: 'Livraison'),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          icon: _deliveryIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
         ),
       );
     }
@@ -473,7 +486,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       Polyline(
         polylineId: const PolylineId('route-glow'),
         points: points,
-        color: const Color(0x4DD946EF),
+        color: const Color(0x406366F1),
         width: 14,
         geodesic: true,
         startCap: Cap.roundCap,
@@ -482,9 +495,10 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       Polyline(
         polylineId: const PolylineId('route-main'),
         points: points,
-        color: const Color(0xFFBE185D),
-        width: 7,
+        color: const Color(0xFF6366F1),
+        width: 6,
         geodesic: true,
+        jointType: JointType.round,
         startCap: Cap.roundCap,
         endCap: Cap.roundCap,
       ),
@@ -504,7 +518,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     }
 
     final int requestSerial = ++_routeRequestSerial;
-    final List<LatLng> routePoints = await _routePreviewService.fetchRoutePoints(
+    final RouteResult routeResult = await _routePreviewService.fetchRoute(
       pickupLat: _pickup.lat!,
       pickupLng: _pickup.lng!,
       deliveryLat: _delivery.lat!,
@@ -513,7 +527,8 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
 
     if (!mounted || requestSerial != _routeRequestSerial) return;
     setState(() {
-      _routePreviewPoints = routePoints;
+      _routePreviewPoints = routeResult.points;
+      _routeDurationText = routeResult.durationText;
     });
     _refreshRequestMapViewport();
   }
@@ -662,8 +677,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         _matches = matches;
         _selectedMatch = matches.isNotEmpty ? matches.first : null;
         _hasSearchedMatches = true;
-        _matchesOverlayHidden = false;
-      });
+        });
     } catch (_) {
       _showMessage('Impossible de rechercher des livreurs pour le moment.');
     } finally {
@@ -761,6 +775,445 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     );
   }
 
+  Future<void> _pickMaxDate(BuildContext ctx) async {
+    final DateTime? picked = await showDatePicker(
+      context: ctx,
+      initialDate: _maxDeliveryDate ?? DateTime.now().add(
+        const Duration(days: 1),
+      ),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 90)),
+      helpText: 'Date limite de livraison',
+      confirmText: 'Confirmer',
+      cancelText: 'Annuler',
+    );
+    if (picked != null && mounted) {
+      setState(() => _maxDeliveryDate = picked);
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    const List<String> months = <String>[
+      'jan', 'fév', 'mar', 'avr', 'mai', 'jun',
+      'jul', 'aoû', 'sep', 'oct', 'nov', 'déc',
+    ];
+    return '${date.day} ${months[date.month - 1]}. ${date.year}';
+  }
+
+  Future<void> _orderMatch(ParcelServiceMatch match) async {
+    if (_isCreatingParcelRequest || !_pickup.isComplete || !_delivery.isComplete) {
+      return;
+    }
+
+    final _RequesterIdentity? requester = await _ensureRequesterIdentity();
+    if (requester == null) return;
+
+    setState(() {
+      _isCreatingParcelRequest = true;
+      _orderingServiceId = match.serviceId;
+      _selectedMatch = match;
+    });
+
+    try {
+      final ParcelRequestDocument request =
+          await _parcelRequestService.createRequest(
+        CreateParcelRequestInput(
+          serviceId: match.serviceId,
+          providerUid: match.ownerUid,
+          providerName: match.contactName,
+          providerPhone: match.contactPhone,
+          requesterUid: requester.uid,
+          requesterName: requester.name,
+          requesterContact: requester.contact,
+          pickupAddress: _pickup.address,
+          pickupLat: _pickup.lat!,
+          pickupLng: _pickup.lng!,
+          deliveryAddress: _delivery.address,
+          deliveryLat: _delivery.lat!,
+          deliveryLng: _delivery.lng!,
+          price: match.price,
+          currency: match.currency,
+          priceSource: match.priceSource,
+          vehicleLabel: match.vehicleLabel,
+          receiverName: _recipientNameController.text.trim(),
+          receiverContactPhone: _recipientPhoneController.text.trim(),
+        ),
+      );
+
+      if (!mounted) return;
+      _showMessage(
+        'Demande ${request.trackNum} envoyee a ${match.contactName}.',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      _showMessage('Impossible de notifier ce livreur pour le moment.');
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isCreatingParcelRequest = false;
+        _orderingServiceId = null;
+      });
+    }
+  }
+
+  Future<_RequesterIdentity?> _ensureRequesterIdentity() async {
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser != null) {
+      return _loadAuthenticatedRequesterIdentity(currentUser);
+    }
+
+    final _RequesterAction? action = await _showRequesterAuthPrompt();
+    if (action == null || !mounted) return null;
+
+    if (action == _RequesterAction.login) {
+      final Object? result = await Navigator.of(context).pushNamed(
+        AppRoutes.authLogin,
+        arguments: <String, dynamic>{'returnToCaller': true},
+      );
+      if (result != true) return null;
+      final User? loggedUser = FirebaseAuth.instance.currentUser;
+      if (loggedUser == null) return null;
+      return _loadAuthenticatedRequesterIdentity(loggedUser);
+    }
+
+    return _showLightAccountPrompt();
+  }
+
+  Future<_RequesterIdentity> _loadAuthenticatedRequesterIdentity(
+    User currentUser,
+  ) async {
+    try {
+      final DocumentSnapshot<Map<String, dynamic>> snapshot =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(currentUser.uid)
+              .get();
+      final Map<String, dynamic> data = snapshot.data() ?? <String, dynamic>{};
+      final String displayName =
+          (data['displayName'] as String? ?? currentUser.displayName ?? '')
+              .trim();
+      final Map<String, dynamic> phone = data['phone'] is Map
+          ? Map<String, dynamic>.from(data['phone'] as Map)
+          : <String, dynamic>{};
+      final String contact = <String>[
+        (phone['countryCode'] as String? ?? '').trim(),
+        (phone['number'] as String? ?? '').trim(),
+      ].where((String value) => value.isNotEmpty).join(' ').trim();
+
+      return _RequesterIdentity(
+        uid: currentUser.uid,
+        name: displayName.isEmpty ? 'Client GoVIP' : displayName,
+        contact: contact.isEmpty
+            ? (currentUser.email ?? '').trim()
+            : contact,
+      );
+    } catch (_) {
+      return _RequesterIdentity(
+        uid: currentUser.uid,
+        name: (currentUser.displayName ?? '').trim().isEmpty
+            ? 'Client GoVIP'
+            : currentUser.displayName!.trim(),
+        contact: (currentUser.email ?? '').trim(),
+      );
+    }
+  }
+
+  Future<_RequesterAction?> _showRequesterAuthPrompt() {
+    return showModalBottomSheet<_RequesterAction>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Avant de commander',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Connectez-vous pour utiliser votre compte, ou laissez simplement votre nom et votre contact pour creer un compte leger.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(_RequesterAction.login),
+                  child: const Text('Se connecter'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context)
+                      .pop(_RequesterAction.lightAccount),
+                  child: const Text('Continuer avec mes infos'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<_RequesterIdentity?> _showLightAccountPrompt() async {
+    final TextEditingController nameController = TextEditingController();
+    final TextEditingController contactController = TextEditingController();
+
+    try {
+      return await showModalBottomSheet<_RequesterIdentity>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        showDragHandle: true,
+        builder: (BuildContext context) {
+          bool isSaving = false;
+          String? errorText;
+
+          Future<void> submit(StateSetter setSheetState) async {
+            final String name = nameController.text.trim();
+            final String rawContact = contactController.text.trim();
+            final String normalizedPhone = _normalizeLightAccountPhone(rawContact);
+
+            if (name.isEmpty) {
+              setSheetState(() {
+                errorText = 'Saisissez votre nom complet.';
+              });
+              return;
+            }
+            if (normalizedPhone.isEmpty) {
+              setSheetState(() {
+                errorText = 'Saisissez un numero de contact valide sur 10 chiffres.';
+              });
+              return;
+            }
+
+            setSheetState(() {
+              isSaving = true;
+              errorText = null;
+            });
+
+            try {
+              final _RequesterIdentity identity =
+                  await _createOrReuseLightRequester(
+                fullName: name,
+                phoneNumber: normalizedPhone,
+              );
+              if (!context.mounted) return;
+              Navigator.of(context).pop(identity);
+            } catch (_) {
+              setSheetState(() {
+                errorText = 'Impossible de preparer votre compte leger pour le moment.';
+                isSaving = false;
+              });
+            }
+          }
+
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              8,
+              20,
+              MediaQuery.of(context).viewInsets.bottom + 24,
+            ),
+            child: StatefulBuilder(
+              builder: (BuildContext context, StateSetter setSheetState) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Vos informations',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Renseignez votre nom complet et votre contact. Nous creerons un compte leger pour envoyer la demande au livreur.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: nameController,
+                      textInputAction: TextInputAction.next,
+                      decoration: _inputDecoration(
+                        context,
+                        label: 'Nom complet',
+                        hint: 'Ex: Awa Kone',
+                        icon: Icons.person_outline_rounded,
+                      ),
+                      onChanged: (_) {
+                        if (errorText == null) return;
+                        setSheetState(() {
+                          errorText = null;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: contactController,
+                      keyboardType: TextInputType.phone,
+                      textInputAction: TextInputAction.done,
+                      decoration: _inputDecoration(
+                        context,
+                        label: 'Contact',
+                        hint: 'Ex: 0700000000',
+                        icon: Icons.call_outlined,
+                      ),
+                      onChanged: (_) {
+                        if (errorText == null) return;
+                        setSheetState(() {
+                          errorText = null;
+                        });
+                      },
+                      onSubmitted: (_) => submit(setSheetState),
+                    ),
+                    if (errorText != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        errorText!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFFB42318),
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: isSaving ? null : () => submit(setSheetState),
+                        child: isSaving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('Envoyer la demande'),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          );
+        },
+      );
+    } finally {
+      nameController.dispose();
+      contactController.dispose();
+    }
+  }
+
+  Future<_RequesterIdentity> _createOrReuseLightRequester({
+    required String fullName,
+    required String phoneNumber,
+  }) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot =
+        await FirebaseFirestore.instance
+            .collection('users')
+            .where('phone.number', isEqualTo: phoneNumber)
+            .limit(1)
+            .get();
+
+    if (snapshot.docs.isNotEmpty) {
+      final String existingUid = snapshot.docs.first.id;
+      await _userFirestoreRepository.update(existingUid, <String, dynamic>{
+        'displayName': fullName,
+        'role': userRoleToJson(UserRole.simpleUser),
+        'phone': <String, dynamic>{
+          'countryCode': '+225',
+          'number': phoneNumber,
+        },
+        'meta': <String, dynamic>{
+          'authEmailSource': 'phone-generated',
+          'lightAccountFlow': 'parcel_request',
+        },
+      });
+
+      return _RequesterIdentity(
+        uid: existingUid,
+        name: fullName,
+        contact: '+225 $phoneNumber',
+      );
+    }
+
+    final String syntheticEmail = '225$phoneNumber@govipuser.local';
+    final String generatedPassword = _buildLightAccountPassword(phoneNumber);
+    final UserCredential credentials =
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      email: syntheticEmail,
+      password: generatedPassword,
+    );
+    final User? authUser = credentials.user;
+    if (authUser == null) {
+      throw FirebaseAuthException(
+        code: 'null-user',
+        message: 'Compte leger introuvable apres creation.',
+      );
+    }
+    await authUser.updateDisplayName(fullName);
+
+    final AppUser user = AppUser(
+      uid: authUser.uid,
+      email: syntheticEmail,
+      displayName: fullName,
+      role: UserRole.simpleUser,
+      phone: UserPhone(countryCode: '+225', number: phoneNumber),
+      photoURL: null,
+      materialPhotoUrl: null,
+      service: null,
+      isServiceProvider: false,
+      createdAt: null,
+      updatedAt: null,
+      archived: false,
+      meta: <String, dynamic>{
+        'authEmailSource': 'phone-generated',
+        'lightAccountFlow': 'parcel_request',
+      },
+    );
+
+    await _userFirestoreRepository.setUser(authUser.uid, user);
+    return _RequesterIdentity(
+      uid: authUser.uid,
+      name: fullName,
+      contact: '+225 $phoneNumber',
+    );
+  }
+
+  String _normalizeLightAccountPhone(String rawContact) {
+    final String digitsOnly = rawContact.replaceAll(RegExp(r'\D'), '');
+    if (digitsOnly.length == 10) return digitsOnly;
+    if (digitsOnly.length == 13 && digitsOnly.startsWith('225')) {
+      return digitsOnly.substring(3);
+    }
+    return '';
+  }
+
+  String _buildLightAccountPassword(String phoneNumber) {
+    return 'GoVip#$phoneNumber';
+  }
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
@@ -791,22 +1244,20 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                   ],
                 ),
               ),
-              _BottomActionBar(
-                canGoBack: _currentStep != _ShipStep.request,
-                continueLabel: _currentStep == _ShipStep.recipient
-                    ? 'Continuer'
-                    : _currentStep == _ShipStep.request
-                        ? _matches.isNotEmpty && _selectedMatch != null
-                            ? 'Continuer'
-                            : 'Voir les livreurs'
-                        : 'Suivant',
-                compactContinueAction: _currentStep == _ShipStep.request,
-                onBack: _currentStep == _ShipStep.request
-                    ? null
-                    : () => _goToStep(_ShipStep.values[_currentStepIndex - 1]),
-                onContinue: _canContinueFromCurrentStep ? _continue : null,
-                isLoading: _isSubmitting,
-              ),
+              if (_currentStep != _ShipStep.request)
+                _BottomActionBar(
+                  canGoBack: true,
+                  showContinueAction: true,
+                  continueLabel: _currentStep == _ShipStep.recipient
+                      ? 'Continuer'
+                      : 'Suivant',
+                  compactContinueAction: false,
+                  onBack: () => _goToStep(
+                    _ShipStep.values[_currentStepIndex - 1],
+                  ),
+                  onContinue: _canContinueFromCurrentStep ? _continue : null,
+                  isLoading: _isSubmitting,
+                ),
             ],
           ),
         ),
@@ -847,9 +1298,9 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: <Color>[
-                    Colors.black.withOpacity(0.10),
-                    Colors.black.withOpacity(0.02),
-                    Colors.black.withOpacity(0.48),
+                    Colors.black.withValues(alpha: 0.10),
+                    Colors.black.withValues(alpha: 0.02),
+                    Colors.black.withValues(alpha: 0.48),
                   ],
                 ),
               ),
@@ -862,26 +1313,27 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
           right: 18,
           child: Row(
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.92),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  'Où livrer',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: const Color(0xFF0F172A),
-                      ),
+              Material(
+                color: Colors.white.withValues(alpha: 0.92),
+                shape: const CircleBorder(),
+                shadowColor: Colors.black26,
+                elevation: 2,
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () => Navigator.of(context).maybePop(),
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.arrow_back_rounded,
+                      size: 22,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
                 ),
               ),
               const Spacer(),
               Material(
-                color: Colors.white.withOpacity(0.92),
+                color: Colors.white.withValues(alpha: 0.92),
                 shape: const CircleBorder(),
                 child: IconButton(
                   tooltip: 'Actualiser ma position',
@@ -900,242 +1352,592 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
             ],
           ),
         ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: const Color(0xFFF9FBFA),
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(34),
+        DraggableScrollableSheet(
+          initialChildSize: 0.40,
+          minChildSize: 0.28,
+          maxChildSize: 0.82,
+          snap: true,
+          snapSizes: const <double>[0.28, 0.40, 0.82],
+          builder: (BuildContext ctx, ScrollController scrollController) {
+            return Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: Color(0x22000000),
+                    blurRadius: 24,
+                    offset: Offset(0, -4),
+                  ),
+                ],
               ),
-              boxShadow: <BoxShadow>[
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.18),
-                  blurRadius: 28,
-                  offset: const Offset(0, 14),
-                ),
-              ],
-            ),
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 46,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFD5DBE4),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
+              child: Column(
+                children: <Widget>[
+                  // ── Handle (sticky) ──────────────────────────────────
+                  Center(
+                    child: Container(
+                      margin: const EdgeInsets.only(top: 12, bottom: 8),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFCBD5E1),
+                        borderRadius: BorderRadius.circular(999),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    const SizedBox(height: 4),
-                    InkWell(
-                      onTap: _openPickupSearchSheet,
-                      borderRadius: BorderRadius.circular(18),
-                      child: _SlimAddressBar(
-                        icon: Icons.my_location_rounded,
-                        iconColor: const Color(0xFF0F766E),
-                        label: 'Départ',
-                        value: _pickup.address.trim().isEmpty
-                            ? 'Position en cours de détection...'
-                            : _pickup.address,
-                        trailingIcon: Icons.chevron_right_rounded,
+                  ),
+
+                  // ── Livreurs (sticky) ─────────────────────────────────
+                  if (_isSearchingMatches || _matches.isNotEmpty || _hasSearchedMatches) ...<Widget>[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
+                      child: Row(
+                        children: <Widget>[
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: _isSearchingMatches
+                                  ? const Color(0xFFF59E0B)
+                                  : _matches.isNotEmpty
+                                      ? const Color(0xFF10B981)
+                                      : const Color(0xFF94A3B8),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _isSearchingMatches
+                                  ? 'Recherche en cours…'
+                                  : _matches.isNotEmpty
+                                      ? 'Livreurs disponibles'
+                                      : 'Aucune correspondance',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF0F172A),
+                                letterSpacing: -0.1,
+                              ),
+                            ),
+                          ),
+                          if (_routeDurationText != null) ...<Widget>[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF6366F1).withValues(alpha: 0.10),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  const Icon(
+                                    Icons.schedule_rounded,
+                                    size: 13,
+                                    color: Color(0xFF6366F1),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _routeDurationText!,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF6366F1),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    InkWell(
-                      onTap: _openDeliverySearchSheet,
-                      borderRadius: BorderRadius.circular(22),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(22),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                          boxShadow: <BoxShadow>[
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.04),
-                              blurRadius: 12,
-                              offset: const Offset(0, 8),
+                    SizedBox(
+                      height: 138,
+                      child: _isSearchingMatches
+                          ? const Center(
+                              child: SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.4,
+                                ),
+                              ),
+                            )
+                          : _matches.isEmpty
+                              ? Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                  ),
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF8FAFC),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: const Color(0xFFE2E8F0),
+                                      ),
+                                    ),
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(14),
+                                      child: Text(
+                                        'Aucun livreur pertinent trouvé pour cette course.',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF475569),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : ListView.separated(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                  ),
+                                  scrollDirection: Axis.horizontal,
+                                  physics: const BouncingScrollPhysics(),
+                                  itemCount: _matches.length,
+                                  separatorBuilder:
+                                      (_, __) => const SizedBox(width: 12),
+                                  itemBuilder:
+                                      (BuildContext context, int index) {
+                                        final ParcelServiceMatch match =
+                                            _matches[index];
+                                        return SizedBox(
+                                          width: 268,
+                                          child: _ParcelMatchCard(
+                                            match: match,
+                                            isSelected:
+                                                _selectedMatch?.serviceId ==
+                                                match.serviceId,
+                                            compact: true,
+                                            onTap: () => _orderMatch(match),
+                                            onOrder: () => _orderMatch(match),
+                                            isOrdering:
+                                                _orderingServiceId ==
+                                                match.serviceId,
+                                          ),
+                                        );
+                                      },
+                                ),
+                    ),
+                    const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                  ],
+
+                  // ── Formulaire (scrollable) ────────────────────────────
+                  Expanded(child: ListView(controller: scrollController, padding: EdgeInsets.zero, children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+
+                        // ── Titre + bouton GPS ─────────────────────────────
+                        Row(
+                          children: <Widget>[
+                            const Text(
+                              'Expédier un colis',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF0F172A),
+                              ),
+                            ),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: _isFetchingPickupLocation
+                                  ? null
+                                  : _useCurrentLocationForPickup,
+                              child: Container(
+                                width: 38,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE6FAF8),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: _isFetchingPickupLocation
+                                    ? const Center(
+                                        child: SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Color(0xFF0F766E),
+                                          ),
+                                        ),
+                                      )
+                                    : const Icon(
+                                        Icons.gps_fixed_rounded,
+                                        size: 20,
+                                        color: Color(0xFF0F766E),
+                                      ),
+                              ),
                             ),
                           ],
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.search_rounded,
-                                color: Color(0xFF0F766E),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Lieu de livraison',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelLarge
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w800,
-                                            color: const Color(0xFF0F172A),
-                                          ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      _delivery.address.trim().isEmpty
-                                          ? 'Touchez pour saisir une destination'
-                                          : _delivery.address,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                            color: _delivery.address.trim().isEmpty
-                                                ? const Color(0xFF94A3B8)
-                                                : const Color(0xFF475569),
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                    ),
-                                  ],
+
+                        const SizedBox(height: 16),
+
+                        // ── Adresse départ ─────────────────────────────────
+                        GestureDetector(
+                          onTap: _openPickupSearchSheet,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 13,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF0FDF9),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xFF0F766E).withValues(
+                                  alpha: 0.25,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              const Icon(
-                                Icons.chevron_right_rounded,
-                                color: Color(0xFF94A3B8),
-                              ),
-                            ],
+                            ),
+                            child: Row(
+                              children: <Widget>[
+                                const Icon(
+                                  Icons.my_location_rounded,
+                                  color: Color(0xFF0F766E),
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      const Text(
+                                        'DÉPART',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                          color: Color(0xFF0F766E),
+                                          letterSpacing: 0.6,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _pickup.address.trim().isEmpty
+                                            ? 'Position en cours de détection...'
+                                            : _pickup.address,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: _pickup.address.trim().isEmpty
+                                              ? const Color(0xFF94A3B8)
+                                              : const Color(0xFF0F172A),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: Color(0xFF94A3B8),
+                                  size: 20,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                    if (_delivery.address.trim().isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        _pickup.isComplete && _delivery.isComplete
-                            ? 'Destination confirmée. Vous pouvez maintenant trouver les meilleurs livreurs.'
-                            : 'Sélectionnez une suggestion pour confirmer la destination.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: const Color(0xFF667085),
-                              fontWeight: FontWeight.w600,
+
+                        const SizedBox(height: 10),
+
+                        // ── Adresse livraison ──────────────────────────────
+                        GestureDetector(
+                          onTap: _openDeliverySearchSheet,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 13,
                             ),
-                      ),
-                    ],
-                  ],
-                ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xFFE2E8F0),
+                              ),
+                              boxShadow: const <BoxShadow>[
+                                BoxShadow(
+                                  color: Color(0x08000000),
+                                  blurRadius: 8,
+                                  offset: Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              children: <Widget>[
+                                const Icon(
+                                  Icons.flag_rounded,
+                                  color: Color(0xFF10B981),
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      const Text(
+                                        'LIVRAISON',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                          color: Color(0xFF10B981),
+                                          letterSpacing: 0.6,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _delivery.address.trim().isEmpty
+                                            ? 'Touchez pour saisir une destination'
+                                            : _delivery.address,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: _delivery.address
+                                                  .trim()
+                                                  .isEmpty
+                                              ? const Color(0xFF94A3B8)
+                                              : const Color(0xFF0F172A),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: Color(0xFF94A3B8),
+                                  size: 20,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 24),
+
+                        // ── Séparateur "Détails de l'envoi" ───────────────
+                        Row(
+                          children: <Widget>[
+                            const Expanded(
+                              child: Divider(color: Color(0xFFE2E8F0)),
+                            ),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              child: Text(
+                                'Détails de l\'envoi',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.grey.shade500,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                            ),
+                            const Expanded(
+                              child: Divider(color: Color(0xFFE2E8F0)),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // ── Instructions ──────────────────────────────────
+                        _ShipDetailField(
+                          controller: _noteController,
+                          icon: Icons.notes_rounded,
+                          label: 'Instructions',
+                          hint: 'Ex: Fragile, tenir à plat...',
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // ── Poids ─────────────────────────────────────────
+                        _ShipDetailField(
+                          controller: _weightController,
+                          icon: Icons.scale_rounded,
+                          label: 'Poids estimé',
+                          hint: 'Ex: 2 kg',
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // ── Date max ──────────────────────────────────────
+                        GestureDetector(
+                          onTap: () => _pickMaxDate(ctx),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 14,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: const Color(0xFFE2E8F0),
+                              ),
+                            ),
+                            child: Row(
+                              children: <Widget>[
+                                const Icon(
+                                  Icons.calendar_today_rounded,
+                                  color: Color(0xFF0F766E),
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      const Text(
+                                        'Date limite de livraison',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF64748B),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _maxDeliveryDate == null
+                                            ? 'Aucune date limite'
+                                            : _formatDate(_maxDeliveryDate!),
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
+                                          color: _maxDeliveryDate == null
+                                              ? const Color(0xFF94A3B8)
+                                              : const Color(0xFF0F172A),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (_maxDeliveryDate != null)
+                                  GestureDetector(
+                                    onTap: () => setState(
+                                      () => _maxDeliveryDate = null,
+                                    ),
+                                    child: const Icon(
+                                      Icons.close_rounded,
+                                      size: 18,
+                                      color: Color(0xFF94A3B8),
+                                    ),
+                                  )
+                                else
+                                  const Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: Color(0xFF94A3B8),
+                                    size: 20,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 24),
+
+                        // ── Bouton principal ──────────────────────────────
+                        GestureDetector(
+                          onTap: _canContinueFromCurrentStep
+                              ? _continue
+                              : null,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            height: 64,
+                            decoration: BoxDecoration(
+                              gradient: _canContinueFromCurrentStep
+                                  ? const LinearGradient(
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                      colors: <Color>[
+                                        Color(0xFF14B8A6),
+                                        Color(0xFF0F766E),
+                                      ],
+                                    )
+                                  : const LinearGradient(
+                                      colors: <Color>[
+                                        Color(0xFFCBD5E1),
+                                        Color(0xFFCBD5E1),
+                                      ],
+                                    ),
+                              borderRadius: BorderRadius.circular(18),
+                              boxShadow: _canContinueFromCurrentStep
+                                  ? <BoxShadow>[
+                                      const BoxShadow(
+                                        color: Color(0x4014B8A6),
+                                        blurRadius: 16,
+                                        offset: Offset(0, 6),
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                            child: Center(
+                              child: _isSearchingMatches
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2.5,
+                                      ),
+                                    )
+                                  : Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: <Widget>[
+                                        const Icon(
+                                          Icons.search_rounded,
+                                          color: Colors.white,
+                                          size: 22,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Text(
+                                          _matches.isNotEmpty &&
+                                                  _selectedMatch != null
+                                              ? 'Continuer'
+                                              : 'Voir les livreurs',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                        ),
+
+                        SizedBox(
+                          height: 20 +
+                              MediaQuery.of(ctx).padding.bottom,
+                        ),
+                      ],
+                    ),
+                  ),
+                  ])),
+                ],
               ),
-            ),
-          ),
+            );
+          },
         ),
-        if (_isSearchingMatches || _matches.isNotEmpty || _hasSearchedMatches)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 246,
-            child: _matchesOverlayHidden
-                ? _buildInlineMatchesCollapsedChip()
-                : _buildInlineMatchesOverlay(colorScheme),
-          ),
       ],
-    );
-  }
-
-  Widget _buildPickupStep(ColorScheme colorScheme) {
-    return _StepScaffold(
-      accentColor: colorScheme.primary,
-      icon: Icons.inventory_2_outlined,
-      title: 'Où récupère-t-on votre colis ?',
-      subtitle:
-          'Entrez une adresse précise ou utilisez votre position actuelle.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AddressAutocompleteField(
-            controller: _pickupController,
-            focusNode: _pickupFocusNode,
-            labelText: 'Lieu de récupération',
-            hintText: 'Rue, quartier, ville...',
-            apiKey: _googleMapsApiKey,
-            onChanged: _handlePickupTextChanged,
-            onPlaceResolved: _applyPickupDetails,
-          ),
-          const SizedBox(height: 14),
-          OutlinedButton.icon(
-            onPressed:
-                _isFetchingPickupLocation ? null : _useCurrentLocationForPickup,
-            icon: _isFetchingPickupLocation
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.my_location_rounded),
-            label: Text(
-              _isFetchingPickupLocation
-                  ? 'Localisation en cours...'
-                  : 'Utiliser ma position',
-            ),
-          ),
-          const SizedBox(height: 18),
-          _AddressStatusCard(
-            title: 'Adresse retenue',
-            icon: Icons.check_circle_outline_rounded,
-            isReady: _pickup.isComplete,
-            lines: [
-              if (_pickup.address.trim().isNotEmpty) _pickup.address,
-              if (_pickup.lat != null && _pickup.lng != null)
-                'Coordonnees: ${_pickup.lat!.toStringAsFixed(5)}, ${_pickup.lng!.toStringAsFixed(5)}',
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDeliveryStep(ColorScheme colorScheme) {
-    return _StepScaffold(
-      accentColor: const Color(0xFF0F766E),
-      icon: Icons.local_shipping_outlined,
-      title: 'Où doit-on livrer le colis ?',
-      subtitle:
-          'Choisissez le point d\'arrivée. L\'adresse doit être sélectionnée dans les suggestions.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AddressAutocompleteField(
-            controller: _deliveryController,
-            focusNode: _deliveryFocusNode,
-            labelText: 'Lieu de livraison',
-            hintText: 'Adresse du destinataire',
-            apiKey: _googleMapsApiKey,
-            onChanged: _handleDeliveryTextChanged,
-            onPlaceResolved: _applyDeliveryDetails,
-          ),
-          const SizedBox(height: 18),
-          _AddressStatusCard(
-            title: 'Destination retenue',
-            icon: Icons.flag_circle_outlined,
-            isReady: _delivery.isComplete,
-            lines: [
-              if (_delivery.address.trim().isNotEmpty) _delivery.address,
-              if (_delivery.lat != null && _delivery.lng != null)
-                'Coordonnees: ${_delivery.lat!.toStringAsFixed(5)}, ${_delivery.lng!.toStringAsFixed(5)}',
-            ],
-          ),
-        ],
-      ),
     );
   }
 
@@ -1185,213 +1987,14 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                             _selectedMatch = match;
                           });
                         },
+                        onOrder: () => _orderMatch(match),
+                        isOrdering: _orderingServiceId == match.serviceId,
                       ),
                     ),
                   )
                   .toList(growable: false),
             ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildInlineMatchesOverlay(ColorScheme colorScheme) {
-    return SizedBox(
-      height: 148,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.92),
-                borderRadius: BorderRadius.circular(999),
-                boxShadow: <BoxShadow>[
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.10),
-                    blurRadius: 18,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: _isSearchingMatches
-                            ? const Color(0xFFF59E0B)
-                            : _matches.isNotEmpty
-                                ? const Color(0xFF10B981)
-                                : const Color(0xFF94A3B8),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        _isSearchingMatches
-                            ? 'Recherche en cours'
-                            : _matches.isNotEmpty
-                                ? 'Livreurs disponibles'
-                                : 'Aucune correspondance',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              color: const Color(0xFF0F172A),
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.1,
-                            ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    InkWell(
-                      onTap: () {
-                        setState(() {
-                          _matchesOverlayHidden = true;
-                        });
-                      },
-                      borderRadius: BorderRadius.circular(999),
-                      child: const Padding(
-                        padding: EdgeInsets.all(2),
-                        child: Icon(
-                          Icons.keyboard_arrow_down_rounded,
-                          color: Color(0xFF64748B),
-                          size: 20,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Expanded(
-            child: _isSearchingMatches
-                ? const Center(
-                    child: SizedBox(
-                      width: 26,
-                      height: 26,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.4,
-                        color: Colors.white,
-                      ),
-                    ),
-                  )
-                : _matches.isEmpty
-                    ? Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 18),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.95),
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Text(
-                              'Aucun livreur pertinent n’a été trouvé pour cette course pour le moment.',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodyMedium
-                                  ?.copyWith(
-                                    color: const Color(0xFF334155),
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                            ),
-                          ),
-                        ),
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.symmetric(horizontal: 18),
-                        scrollDirection: Axis.horizontal,
-                        physics: const BouncingScrollPhysics(),
-                        itemBuilder: (BuildContext context, int index) {
-                          final ParcelServiceMatch match = _matches[index];
-                          return SizedBox(
-                            width: 268,
-                            child: _ParcelMatchCard(
-                              match: match,
-                              isSelected:
-                                  _selectedMatch?.serviceId == match.serviceId,
-                              compact: true,
-                              onTap: () {
-                                setState(() {
-                                  _selectedMatch = match;
-                                });
-                              },
-                            ),
-                          );
-                        },
-                        separatorBuilder: (_, __) => const SizedBox(width: 12),
-                        itemCount: _matches.length,
-                      ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInlineMatchesCollapsedChip() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: InkWell(
-          onTap: () {
-            setState(() {
-              _matchesOverlayHidden = false;
-            });
-          },
-          borderRadius: BorderRadius.circular(999),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.94),
-              borderRadius: BorderRadius.circular(999),
-              boxShadow: <BoxShadow>[
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.10),
-                  blurRadius: 18,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.local_shipping_outlined,
-                    size: 16,
-                    color: Color(0xFF0F766E),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _matches.isNotEmpty
-                        ? 'Afficher les livreurs'
-                        : 'Afficher le résultat',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: const Color(0xFF0F172A),
-                          fontWeight: FontWeight.w800,
-                        ),
-                  ),
-                  const SizedBox(width: 6),
-                  const Icon(
-                    Icons.keyboard_arrow_up_rounded,
-                    color: Color(0xFF64748B),
-                    size: 20,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -1521,1036 +2124,3 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
   }
 }
 
-class _ProgressHeader extends StatelessWidget {
-  const _ProgressHeader({required this.currentStep});
-
-  final _ShipStep currentStep;
-
-  @override
-  Widget build(BuildContext context) {
-    const List<String> labels = <String>[
-      'Demande',
-      'Choix',
-      'Destinataire',
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Nouvel envoi',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Un parcours simple, étape par étape, pour lancer une demande d\'expédition.',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: List<Widget>.generate(labels.length, (int index) {
-            final bool isActive = index == currentStep.index;
-            final bool isDone = index < currentStep.index;
-            return Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(right: index == labels.length - 1 ? 0 : 8),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: isActive || isDone
-                        ? const Color(0xFF0F766E)
-                        : const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${index + 1}',
-                        style: TextStyle(
-                          color:
-                              isActive || isDone ? Colors.white : Colors.black54,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        labels[index],
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color:
-                              isActive || isDone ? Colors.white : Colors.black87,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }),
-        ),
-      ],
-    );
-  }
-}
-
-class _StepScaffold extends StatelessWidget {
-  const _StepScaffold({
-    required this.accentColor,
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.child,
-    this.compactHeader = false,
-  });
-
-  final Color accentColor;
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Widget child;
-  final bool compactHeader;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
-      physics: const BouncingScrollPhysics(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  accentColor.withOpacity(0.12),
-                  accentColor.withOpacity(0.03),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: accentColor.withOpacity(0.12)),
-            ),
-            child: Padding(
-              padding: EdgeInsets.all(compactHeader ? 16 : 18),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: accentColor,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Icon(icon, color: Colors.white),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                        ),
-                        SizedBox(height: compactHeader ? 4 : 6),
-                        Text(
-                          subtitle,
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                  ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _PickupHeroCard extends StatelessWidget {
-  const _PickupHeroCard({
-    required this.isLoadingLocation,
-    required this.pickupAddress,
-    required this.onRefreshLocation,
-  });
-
-  final bool isLoadingLocation;
-  final String pickupAddress;
-  final VoidCallback onRefreshLocation;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: <Color>[
-            Color(0xFF0F766E),
-            Color(0xFF115E59),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(26),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: const Color(0xFF0F766E).withOpacity(0.22),
-            blurRadius: 24,
-            offset: const Offset(0, 14),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.16),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(
-                    Icons.my_location_rounded,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Départ détecté',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                            ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        pickupAddress.trim().isEmpty
-                            ? 'Détection en cours ou position à confirmer.'
-                            : pickupAddress,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Colors.white.withOpacity(0.88),
-                              height: 1.35,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            TextButton.icon(
-              onPressed: isLoadingLocation ? null : onRefreshLocation,
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.white,
-                padding: EdgeInsets.zero,
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              icon: isLoadingLocation
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.gps_fixed_rounded, size: 18),
-              label: const Text('Actualiser ma position'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AddressSearchSheetRoute extends StatefulWidget {
-  const _AddressSearchSheetRoute({required this.child});
-
-  final Widget child;
-
-  @override
-  State<_AddressSearchSheetRoute> createState() => _AddressSearchSheetRouteState();
-}
-
-class _AddressSearchSheetRouteState extends State<_AddressSearchSheetRoute> {
-  double _dragOffset = 0;
-
-  void _handleDragUpdate(DragUpdateDetails details) {
-    final double nextOffset = (_dragOffset + details.delta.dy).clamp(0, 220);
-    if (nextOffset == _dragOffset) return;
-    setState(() {
-      _dragOffset = nextOffset;
-    });
-  }
-
-  void _handleDragEnd(DragEndDetails details) {
-    final double velocity = details.primaryVelocity ?? 0;
-    if (_dragOffset > 120 || velocity > 900) {
-      Navigator.of(context).maybePop();
-      return;
-    }
-    setState(() {
-      _dragOffset = 0;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final MediaQueryData mediaQuery = MediaQuery.of(context);
-        final double maxHeight =
-            constraints.maxHeight - mediaQuery.padding.top - 6;
-
-        return Material(
-          type: MaterialType.transparency,
-          child: SafeArea(
-            bottom: false,
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween<double>(begin: 0.36, end: 1),
-                duration: const Duration(milliseconds: 420),
-                curve: Curves.easeOutCubic,
-                builder: (BuildContext context, double value, Widget? child) {
-                  final double height = maxHeight * value;
-                  return AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
-                    transform: Matrix4.translationValues(
-                      0,
-                      ((1 - value) * 24) + _dragOffset,
-                      0,
-                    ),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: height,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onVerticalDragUpdate: _handleDragUpdate,
-                        onVerticalDragEnd: _handleDragEnd,
-                        child: child,
-                      ),
-                    ),
-                  );
-                },
-                child: widget.child,
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _AddressSheetCompanionConfig {
-  const _AddressSheetCompanionConfig({
-    required this.label,
-    required this.value,
-    required this.onTap,
-  });
-
-  final String label;
-  final String value;
-  final VoidCallback onTap;
-}
-
-class _AddressSearchSheet extends StatefulWidget {
-  const _AddressSearchSheet({
-    required this.title,
-    required this.apiKey,
-    required this.initialAddress,
-    required this.labelText,
-    required this.hintText,
-    required this.onResolved,
-  });
-
-  static _AddressSheetCompanionConfig? companionConfig;
-
-  final String title;
-  final String apiKey;
-  final String initialAddress;
-  final String labelText;
-  final String hintText;
-  final ValueChanged<PlaceDetailsResult> onResolved;
-
-  @override
-  State<_AddressSearchSheet> createState() => _AddressSearchSheetState();
-}
-
-class _AddressSearchSheetState extends State<_AddressSearchSheet> {
-  late final TextEditingController _controller;
-  final FocusNode _focusNode = FocusNode();
-  bool _entered = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialAddress);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        setState(() {
-          _entered = true;
-        });
-      }
-      _focusNode.requestFocus();
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final _AddressSheetCompanionConfig? companionConfig =
-        _AddressSearchSheet.companionConfig;
-    return AnimatedOpacity(
-      duration: const Duration(milliseconds: 260),
-      opacity: _entered ? 1 : 0,
-      child: DecoratedBox(
-        decoration: const BoxDecoration(
-          color: Color(0xFFF9FBFA),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(34)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 46,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFD5DBE4),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                )
-                    .animate()
-                    .fadeIn(duration: 220.ms)
-                    .slideY(begin: -0.8, end: 0, duration: 320.ms),
-              ),
-              const SizedBox(height: 16),
-                Row(
-                  children: [
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.9),
-                      shape: BoxShape.circle,
-                      boxShadow: <BoxShadow>[
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.06),
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: IconButton(
-                      onPressed: () => Navigator.of(context).maybePop(),
-                      tooltip: 'Fermer',
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  )
-                      .animate()
-                      .fadeIn(delay: 40.ms, duration: 220.ms)
-                      .slideX(begin: -0.2, end: 0, duration: 280.ms),
-                  Expanded(
-                    child: Text(
-                      widget.title,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            color: const Color(0xFF0F172A),
-                          ),
-                    )
-                        .animate()
-                        .fadeIn(delay: 80.ms, duration: 240.ms)
-                        .slideY(begin: 0.15, end: 0, duration: 320.ms),
-                  ),
-                ],
-              ),
-              if (companionConfig != null) ...[
-                const SizedBox(height: 14),
-                InkWell(
-                  onTap: companionConfig.onTap,
-                  borderRadius: BorderRadius.circular(18),
-                  child: _SlimAddressBar(
-                    icon: Icons.swap_horiz_rounded,
-                    iconColor: const Color(0xFF0F766E),
-                    label: companionConfig.label,
-                    value: companionConfig.value,
-                    trailingIcon: Icons.chevron_right_rounded,
-                  ),
-                )
-                    .animate()
-                    .fadeIn(delay: 145.ms, duration: 250.ms)
-                    .slideY(begin: 0.2, end: 0, duration: 340.ms),
-              ],
-              const SizedBox(height: 18),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(26),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: const Color(0xFF0F172A).withOpacity(0.06),
-                      blurRadius: 22,
-                      offset: const Offset(0, 14),
-                    ),
-                  ],
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFECFDF5),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: const Icon(
-                              Icons.search_rounded,
-                              color: Color(0xFF0F766E),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  widget.labelText,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelLarge
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.w800,
-                                        color: const Color(0xFF0F172A),
-                                      ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Recherchez un lieu précis pour continuer.',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
-                                      ?.copyWith(
-                                        color: const Color(0xFF667085),
-                                      ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Theme(
-                        data: Theme.of(context).copyWith(
-                          inputDecorationTheme: InputDecorationTheme(
-                            labelStyle: const TextStyle(
-                              color: Color(0xFF475467),
-                              fontWeight: FontWeight.w700,
-                            ),
-                            hintStyle: const TextStyle(
-                              color: Color(0xFF98A2B3),
-                              fontWeight: FontWeight.w500,
-                            ),
-                            filled: true,
-                            fillColor: const Color(0xFFF8FAFC),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 16,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(18),
-                              borderSide: const BorderSide(
-                                color: Color(0xFFE2E8F0),
-                              ),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(18),
-                              borderSide: const BorderSide(
-                                color: Color(0xFFE2E8F0),
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(18),
-                              borderSide: const BorderSide(
-                                color: Color(0xFF0F766E),
-                                width: 1.8,
-                              ),
-                            ),
-                          ),
-                        ),
-                        child: AddressAutocompleteField(
-                          controller: _controller,
-                          focusNode: _focusNode,
-                          labelText: widget.labelText,
-                          hintText: widget.hintText,
-                          apiKey: widget.apiKey,
-                          countries: const <String>['ci', 'fr'],
-                          suggestionTypes: null,
-                          onPlaceResolved: widget.onResolved,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-                  .animate()
-                  .fadeIn(delay: 160.ms, duration: 260.ms)
-                  .slideY(begin: 0.22, end: 0, duration: 360.ms),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SlimAddressBar extends StatelessWidget {
-  const _SlimAddressBar({
-    required this.icon,
-    required this.iconColor,
-    required this.label,
-    required this.value,
-    this.trailingIcon,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String label;
-  final String value;
-  final IconData? trailingIcon;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: iconColor),
-            const SizedBox(width: 10),
-            Text(
-              '$label :',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: const Color(0xFF0F172A),
-                  ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: const Color(0xFF475569),
-                      fontWeight: FontWeight.w600,
-                  ),
-              ),
-            ),
-            if (trailingIcon != null) ...[
-              const SizedBox(width: 8),
-              Icon(
-                trailingIcon,
-                color: const Color(0xFF94A3B8),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AddressStatusCard extends StatelessWidget {
-  const _AddressStatusCard({
-    required this.title,
-    required this.icon,
-    required this.isReady,
-    required this.lines,
-  });
-
-  final String title;
-  final IconData icon;
-  final bool isReady;
-  final List<String> lines;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colorScheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: isReady ? const Color(0xFFEAF7F1) : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: isReady ? const Color(0xFF99D3B7) : colorScheme.outlineVariant,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              icon,
-              color: isReady ? const Color(0xFF0F766E) : colorScheme.primary,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                  const SizedBox(height: 6),
-                  if (lines.isEmpty)
-                    Text(
-                      'Sélectionnez une adresse valide pour continuer.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                    )
-                  else
-                    ...lines.map(
-                      (String line) => Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text(
-                          line,
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({
-    required this.icon,
-    required this.title,
-    required this.value,
-  });
-
-  final IconData icon;
-  final String title;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: const Color(0xFF0F766E)),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ParcelMatchCard extends StatelessWidget {
-  const _ParcelMatchCard({
-    required this.match,
-    required this.isSelected,
-    required this.onTap,
-    this.compact = false,
-  });
-
-  final ParcelServiceMatch match;
-  final bool isSelected;
-  final VoidCallback onTap;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color accent = isSelected
-        ? const Color(0xFF0F766E)
-        : const Color(0xFFCBD5E1);
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: accent, width: isSelected ? 1.8 : 1),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 14,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(22),
-        child: Padding(
-          padding: EdgeInsets.all(compact ? 8 : 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      match.contactName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            fontSize: compact ? 13 : null,
-                          ),
-                    ),
-                  ),
-                  SizedBox(width: compact ? 4 : 12),
-                  Text(
-                    '${_formatPrice(match.price)} ${match.currency}',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: const Color(0xFF0F766E),
-                          fontSize: compact ? 13 : null,
-                        ),
-                  ),
-                ],
-              ),
-              SizedBox(height: compact ? 4 : 8),
-              Wrap(
-                spacing: compact ? 4 : 8,
-                runSpacing: compact ? 4 : 8,
-                children: [
-                  _matchPill(match.priceSource),
-                  _matchPill(match.vehicleLabel),
-                  _matchPill(_distanceLabel(match.distanceToPickupMeters)),
-                  if (!compact)
-                    _matchPill(
-                      match.isZoneCovered ? 'Tarif prestataire' : 'Tarif GoVIP',
-                    ),
-                ],
-              ),
-              if (!compact) ...[
-                const SizedBox(height: 10),
-                Text(
-                  match.isZoneCovered
-                      ? 'Tarif du prestataire applique pour cette course.'
-                      : 'Tarif GoVIP applique car le service ne couvre pas directement cette zone.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _matchPill(String label) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF334155),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-String _distanceLabel(double meters) {
-  if (meters < 1000) {
-    return '${meters.round()} m';
-  }
-  return '${(meters / 1000).toStringAsFixed(1)} km';
-}
-
-String _formatPrice(double value) {
-  if (value == value.roundToDouble()) {
-    return value.toInt().toString();
-  }
-  return value.toStringAsFixed(0);
-}
-
-class _BottomActionBar extends StatelessWidget {
-  const _BottomActionBar({
-    required this.canGoBack,
-    required this.continueLabel,
-    required this.compactContinueAction,
-    required this.onBack,
-    required this.onContinue,
-    required this.isLoading,
-  });
-
-  final bool canGoBack;
-  final String continueLabel;
-  final bool compactContinueAction;
-  final VoidCallback? onBack;
-  final VoidCallback? onContinue;
-  final bool isLoading;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        border: Border(
-          top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-        ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
-          child: Row(
-            mainAxisAlignment: compactContinueAction
-                ? MainAxisAlignment.end
-                : MainAxisAlignment.start,
-            children: [
-              if (canGoBack) ...[
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: isLoading ? null : onBack,
-                    child: const Text('Retour'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-              ],
-              if (compactContinueAction)
-                TextButton.icon(
-                  onPressed: isLoading ? null : onContinue,
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF0F766E),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 8,
-                    ),
-                    textStyle: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 15,
-                    ),
-                  ),
-                  icon: isLoading
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.tune_rounded, size: 18),
-                  label: Text(continueLabel),
-                )
-              else
-                Expanded(
-                  flex: 2,
-                  child: FilledButton(
-                    onPressed: isLoading ? null : onContinue,
-                    child: isLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : Text(continueLabel),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

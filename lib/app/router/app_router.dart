@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:govipservices/app/presentation/home_page.dart';
 import 'package:govipservices/app/router/app_routes.dart';
+import 'package:govipservices/features/parcels/domain/models/parcel_request_models.dart';
 import 'package:govipservices/features/parcels/presentation/pages/offer_service_page.dart';
+import 'package:govipservices/features/parcels/presentation/pages/parcel_delivery_run_page.dart';
 import 'package:govipservices/features/parcels/presentation/pages/ship_package_page.dart';
 import 'package:govipservices/features/parcels/presentation/pages/vip_shopping_page.dart';
 import 'package:govipservices/features/notifications/presentation/pages/notifications_page.dart';
@@ -61,6 +63,13 @@ class AppRouter {
       case AppRoutes.parcelsOfferService:
         return MaterialPageRoute<void>(
           builder: (_) => const OfferServicePage(),
+          settings: settings,
+        );
+      case AppRoutes.parcelsDeliveryRun:
+        final ParcelRequestDocument request =
+            settings.arguments! as ParcelRequestDocument;
+        return MaterialPageRoute<void>(
+          builder: (_) => ParcelDeliveryRunPage(request: request),
           settings: settings,
         );
       case AppRoutes.travelAddTrip:

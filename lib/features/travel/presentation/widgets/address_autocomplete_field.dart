@@ -104,7 +104,8 @@ class _AddressAutocompleteFieldState extends State<AddressAutocompleteField>
       setState(() {
         _isLoading = false;
         _suggestions = const <PlaceSuggestion>[];
-        _errorText = 'Cl\u00E9 Google Maps absente. Lancez l\'app avec --dart-define=GOOGLE_MAPS_API_KEY=...';
+        _errorText =
+            'Cl\u00E9 Google Maps absente. Configurez GOOGLE_MAPS_API_KEY dans le build de l\'application.';
       });
       return;
     }

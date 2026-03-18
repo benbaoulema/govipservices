@@ -381,6 +381,8 @@ class _NotificationCard extends StatelessWidget {
 
 String _ctaLabel(AppNotification notification) {
   switch (notification.type.trim()) {
+    case 'parcel_request_created':
+      return 'Voir la demande colis';
     case 'booking_created':
       return 'Voir les réservations du trajet';
     case 'booking_status_updated':
@@ -418,6 +420,8 @@ Color _iconColor(String domain) {
 
 IconData _iconForType(String type) {
   switch (type.trim()) {
+    case 'parcel_request_created':
+      return Icons.local_shipping_outlined;
     case 'booking_created':
       return Icons.confirmation_number_outlined;
     case 'booking_status_updated':

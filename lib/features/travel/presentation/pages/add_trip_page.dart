@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/travel/data/google_places_service.dart';
 import 'package:govipservices/features/travel/data/route_stop_suggestion_service.dart';
@@ -118,7 +119,7 @@ class AddTripPage extends StatefulWidget {
 }
 
 class _AddTripPageState extends State<AddTripPage> {
-  static const String _googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
+  String get _googleMapsApiKey => RuntimeAppConfig.googleMapsApiKey;
   static const LatLng _defaultMapCenter = LatLng(5.3600, -4.0083);
   static const RouteStopSuggestionService _routeSuggestionService = RouteStopSuggestionService();
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();

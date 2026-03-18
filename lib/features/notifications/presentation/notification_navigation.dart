@@ -2,6 +2,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/notifications/domain/models/app_notification.dart';
+import 'package:govipservices/features/parcels/data/parcel_request_service.dart';
+import 'package:govipservices/features/parcels/domain/models/parcel_request_models.dart';
+import 'package:govipservices/features/parcels/presentation/widgets/global_parcel_request_listener.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/data/voyage_booking_service.dart';
 import 'package:govipservices/features/travel/domain/models/trip_detail_models.dart';
@@ -12,11 +15,14 @@ class NotificationNavigation {
   NotificationNavigation({
     TravelRepository? travelRepository,
     VoyageBookingService? bookingService,
+    ParcelRequestService? parcelRequestService,
   })  : _travelRepository = travelRepository ?? TravelRepository(),
-        _bookingService = bookingService ?? VoyageBookingService();
+        _bookingService = bookingService ?? VoyageBookingService(),
+        _parcelRequestService = parcelRequestService ?? ParcelRequestService();
 
   final TravelRepository _travelRepository;
   final VoyageBookingService _bookingService;
+  final ParcelRequestService _parcelRequestService;
 
   Future<String?> openFromAppNotification(
     BuildContext context,
@@ -36,8 +42,11 @@ class NotificationNavigation {
     Map<String, dynamic> payload,
   ) async {
     final String domain = (payload['domain'] as String? ?? '').trim();
+    if (domain == 'parcel') {
+      return _openParcelRequest(context, payload);
+    }
     if (domain != 'travel') {
-      return 'Ouverture bientôt disponible.';
+      return 'Ouverture bientot disponible.';
     }
 
     final String type = (payload['type'] as String? ?? '').trim();
@@ -65,6 +74,27 @@ class NotificationNavigation {
       default:
         return 'Aucune action disponible.';
     }
+  }
+
+  Future<String?> _openParcelRequest(
+    BuildContext context,
+    Map<String, dynamic> payload,
+  ) async {
+    final String requestId =
+        '${payload['demandId'] ?? payload['entityId'] ?? ''}'.trim();
+    if (requestId.isEmpty) return 'Demande colis introuvable.';
+
+    final ParcelRequestDocument? request =
+        await _parcelRequestService.fetchRequestById(requestId);
+    if (request == null) return 'Demande colis introuvable.';
+    if (!context.mounted) return null;
+
+    await showParcelRequestPopup(
+      context: context,
+      request: request,
+      requestService: _parcelRequestService,
+    );
+    return null;
   }
 
   Future<String?> _openBooking(
@@ -122,3 +152,6 @@ class NotificationNavigation {
     return null;
   }
 }
+
+
+

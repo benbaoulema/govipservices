@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:govipservices/app/app.dart';
+import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/firebase/firebase_env.dart';
 import 'package:govipservices/firebase/firebase_options_dev.dart';
 import 'package:govipservices/firebase/firebase_options_prod.dart';
@@ -9,6 +10,7 @@ import 'package:govipservices/features/notifications/presentation/fcm_service.da
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await RuntimeAppConfig.initialize();
   bool firebaseReady = false;
   try {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {

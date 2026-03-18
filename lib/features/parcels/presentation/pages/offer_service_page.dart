@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/parcels/data/vehicle_type_repository.dart';
 import 'package:govipservices/features/parcels/domain/models/vehicle_type.dart';
@@ -97,8 +98,7 @@ class OfferServicePage extends StatefulWidget {
 }
 
 class _OfferServicePageState extends State<OfferServicePage> {
-  static const String _googleMapsApiKey =
-      String.fromEnvironment('GOOGLE_MAPS_API_KEY');
+  String get _googleMapsApiKey => RuntimeAppConfig.googleMapsApiKey;
 
   final VehicleTypeRepository _vehicleTypeRepository = VehicleTypeRepository();
   final UserFirestoreRepository _userFirestoreRepository =

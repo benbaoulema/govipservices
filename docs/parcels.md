@@ -52,7 +52,13 @@ Apres saisie du depart et de l'arrivee, l'application :
 1. requete les `services` actifs avec `search.isSearchable == true`
 2. calcule localement un score de correspondance
 3. garde au maximum `3` resultats
-4. laisse le client choisir un livreur avant la suite
+4. laisse le client notifier directement un livreur depuis la carte de resultat
+
+Quand le client clique sur un livreur :
+
+- un document est cree dans `demands`
+- le prestataire cible recoit une notification `parcel_request_created`
+- le flux ne change pas d'etape automatiquement
 
 Priorites actuelles :
 

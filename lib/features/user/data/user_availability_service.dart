@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 
 enum UserAvailabilityScope { travel, parcels, all }
@@ -130,6 +131,8 @@ class UserAvailabilityService {
       <String, dynamic>{'availability': availability},
       SetOptions(merge: true),
     );
+    final String? ownerCity =
+        await _reverseGeocodeCity(position.latitude, position.longitude);
     await _syncParcelServicesSearch(
       uid: user.uid,
       isOnline: true,
@@ -137,6 +140,7 @@ class UserAvailabilityService {
       lat: position.latitude,
       lng: position.longitude,
       geohash: geohash,
+      ownerCity: ownerCity,
     );
 
     return UserAvailabilitySnapshot(
@@ -192,6 +196,22 @@ class UserAvailabilityService {
     final UserAvailabilitySnapshot current = await fetchCurrent();
     if (!current.isOnline) return null;
     return goOnline(scope: scope ?? current.scope);
+  }
+
+  Future<String?> _reverseGeocodeCity(double lat, double lng) async {
+    try {
+      final List<Placemark> placemarks =
+          await placemarkFromCoordinates(lat, lng);
+      if (placemarks.isNotEmpty) {
+        final Placemark p = placemarks.first;
+        final String city =
+            (p.locality?.isNotEmpty == true ? p.locality : p.subAdministrativeArea) ??
+                p.administrativeArea ??
+                '';
+        return city.isNotEmpty ? city : null;
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<Position> _resolvePosition() async {
@@ -287,6 +307,7 @@ class UserAvailabilityService {
     required double? lat,
     required double? lng,
     required String? geohash,
+    String? ownerCity,
   }) async {
     final QuerySnapshot<Map<String, dynamic>> snapshot =
         await _firestore
@@ -313,6 +334,7 @@ class UserAvailabilityService {
           'ownerLat': lat,
           'ownerLng': lng,
           'ownerGeohash': geohash,
+          if (ownerCity != null) 'ownerCity': ownerCity,
           'ownerAvailabilityUpdatedAt': FieldValue.serverTimestamp(),
         },
         'ownerAvailability': <String, dynamic>{

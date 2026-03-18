@@ -9,6 +9,7 @@ class AppRoutes {
   static const String parcelsShipPackage = '/parcels/ship-package';
   static const String parcelsVipShopping = '/parcels/vip-shopping';
   static const String parcelsOfferService = '/parcels/offer-service';
+  static const String parcelsDeliveryRun = '/parcels/delivery-run';
 
   static const String travelAddTrip = '/travel/add-trip';
   static const String travelBookTrip = '/travel/book-trip';

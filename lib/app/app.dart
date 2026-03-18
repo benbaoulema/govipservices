@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:govipservices/app/navigation/app_navigator.dart';
 import 'package:govipservices/app/presentation/intro_page.dart';
 import 'package:govipservices/app/router/app_router.dart';
+import 'package:govipservices/features/parcels/presentation/widgets/global_parcel_request_listener.dart';
 import 'package:govipservices/features/travel/presentation/widgets/global_booking_request_listener.dart';
 
 class GoVipApp extends StatelessWidget {
@@ -71,8 +72,10 @@ class GoVipApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      builder: (context, child) => GlobalBookingRequestListener(
-        child: child ?? const SizedBox.shrink(),
+      builder: (context, child) => GlobalParcelRequestListener(
+        child: GlobalBookingRequestListener(
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
       home: const IntroGatePage(),
       onGenerateRoute: AppRouter.onGenerateRoute,
