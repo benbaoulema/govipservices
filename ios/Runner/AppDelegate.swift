@@ -9,11 +9,26 @@ import GoogleMaps
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     #if DEBUG
-      GMSServices.provideAPIKey("AIzaSyACaI8ytW1F68P2bQjk3E19FV6GXFGXxHg")
+      let googleMapsApiKey = "AIzaSyACaI8ytW1F68P2bQjk3E19FV6GXFGXxHg"
     #else
-      GMSServices.provideAPIKey("AIzaSyDFog7Tzn1kz55dAH6fEBzZhe0V2LzO8pk")
+      let googleMapsApiKey = "AIzaSyDFog7Tzn1kz55dAH6fEBzZhe0V2LzO8pk"
     #endif
+    GMSServices.provideAPIKey(googleMapsApiKey)
     GeneratedPluginRegistrant.register(with: self)
+
+    let controller = window?.rootViewController as! FlutterViewController
+    let channel = FlutterMethodChannel(
+      name: "govipservices/runtime_config",
+      binaryMessenger: controller.binaryMessenger
+    )
+    channel.setMethodCallHandler { call, result in
+      if call.method == "getGoogleMapsApiKey" {
+        result(googleMapsApiKey)
+      } else {
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 }
