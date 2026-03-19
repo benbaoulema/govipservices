@@ -162,6 +162,13 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
           _status != _RunStatus.pickedUp;
       setState(() => _courierPosition = pos);
       if (needsRoute) _refreshRoute();
+      if (_status != _RunStatus.delivered) {
+        _requestService.updateCourierLocation(
+          requestId: widget.request.id,
+          lat: pos.latitude,
+          lng: pos.longitude,
+        );
+      }
     });
   }
 

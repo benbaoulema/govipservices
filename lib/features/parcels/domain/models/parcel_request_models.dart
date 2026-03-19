@@ -67,6 +67,8 @@ class ParcelRequestDocument {
     this.receiverName = '',
     this.receiverContactPhone = '',
     this.createdAt,
+    this.courierLat,
+    this.courierLng,
   });
 
   final String id;
@@ -90,6 +92,8 @@ class ParcelRequestDocument {
   final String receiverName;
   final String receiverContactPhone;
   final Timestamp? createdAt;
+  final double? courierLat;
+  final double? courierLng;
 
   factory ParcelRequestDocument.fromMap(String id, Map<String, dynamic> map) {
     final Map<String, dynamic>? pickupLatLng =
@@ -120,6 +124,8 @@ class ParcelRequestDocument {
       receiverContactPhone:
           (map['receiverContactPhone'] as String? ?? '').trim(),
       createdAt: map['createdAt'] as Timestamp?,
+      courierLat: (map['courierLat'] as num?)?.toDouble(),
+      courierLng: (map['courierLng'] as num?)?.toDouble(),
     );
   }
 }

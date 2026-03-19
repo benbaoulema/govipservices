@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -117,6 +118,24 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
   int _routeRequestSerial = 0;
   String? _routeDurationText;
 
+  // Contacts confirmed before ordering
+  String _confirmedSenderContact = '';
+  String _confirmedReceiverName = '';
+  String _confirmedReceiverPhone = '';
+
+  final DraggableScrollableController _sheetController =
+      DraggableScrollableController();
+
+  // Active request watch (after ordering)
+  String? _activeRequestId;
+  String? _activeTrackNum;
+  ParcelServiceMatch? _activeMatch;
+  _SenderRequestStatus _activeStatus = _SenderRequestStatus.pending;
+  LatLng? _courierLivePosition;
+  String? _courierEtaText;
+  StreamSubscription<ParcelRequestDocument?>? _requestSub;
+  BitmapDescriptor? _courierLiveIcon;
+
   BitmapDescriptor? _pickupIcon;
   BitmapDescriptor? _deliveryIcon;
 
@@ -155,11 +174,13 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     final List<BitmapDescriptor> icons = await Future.wait(<Future<BitmapDescriptor>>[
       _emojiToBitmap('📦', 42),
       _emojiToBitmap('🏍️📦', 36),
+      _emojiToBitmap('🏍️', 44),
     ]);
     if (!mounted) return;
     setState(() {
       _pickupIcon = icons[0];
       _deliveryIcon = icons[1];
+      _courierLiveIcon = icons[2];
     });
   }
 
@@ -180,6 +201,8 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     _recipientPhoneFocusNode.dispose();
     _noteController.dispose();
     _weightController.dispose();
+    _requestSub?.cancel();
+    _sheetController.dispose();
     super.dispose();
   }
 
@@ -462,6 +485,20 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         ),
       );
     }
+    if (_courierLivePosition != null) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('courier_live'),
+          position: _courierLivePosition!,
+          infoWindow: InfoWindow(
+            title: _activeMatch?.contactName ?? 'Livreur',
+            snippet: 'En route',
+          ),
+          icon: _courierLiveIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          zIndex: 2,
+        ),
+      );
+    }
     return markers;
   }
 
@@ -486,7 +523,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       Polyline(
         polylineId: const PolylineId('route-glow'),
         points: points,
-        color: const Color(0x406366F1),
+        color: const Color(0x400F766E),
         width: 14,
         geodesic: true,
         startCap: Cap.roundCap,
@@ -495,7 +532,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       Polyline(
         polylineId: const PolylineId('route-main'),
         points: points,
-        color: const Color(0xFF6366F1),
+        color: const Color(0xFF0F766E),
         width: 6,
         geodesic: true,
         jointType: JointType.round,
@@ -805,9 +842,38 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       return;
     }
 
+    // 1. Identify the sender
     final _RequesterIdentity? requester = await _ensureRequesterIdentity();
-    if (requester == null) return;
+    if (requester == null || !mounted) return;
 
+    // 2. Resolve pre-fill values
+    final String prefillSender = _confirmedSenderContact.isNotEmpty
+        ? _confirmedSenderContact
+        : requester.contact;
+    final String prefillReceiverName = _confirmedReceiverName.isNotEmpty
+        ? _confirmedReceiverName
+        : _recipientNameController.text.trim();
+    final String prefillReceiverPhone = _confirmedReceiverPhone.isNotEmpty
+        ? _confirmedReceiverPhone
+        : _recipientPhoneController.text.trim();
+
+    // 3. Always show contact confirmation sheet (pre-filled)
+    final _ContactConfirmResult? confirmed = await _showContactConfirmSheet(
+      prefillSenderContact: prefillSender,
+      prefillReceiverName: prefillReceiverName,
+      prefillReceiverPhone: prefillReceiverPhone,
+    );
+    if (confirmed == null || !mounted) return;
+    final String senderContact = confirmed.senderContact;
+    final String receiverName = confirmed.receiverName;
+    final String receiverPhone = confirmed.receiverPhone;
+    setState(() {
+      _confirmedSenderContact = senderContact;
+      _confirmedReceiverName = receiverName;
+      _confirmedReceiverPhone = receiverPhone;
+    });
+
+    // 4. Place the order
     setState(() {
       _isCreatingParcelRequest = true;
       _orderingServiceId = match.serviceId;
@@ -824,7 +890,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
           providerPhone: match.contactPhone,
           requesterUid: requester.uid,
           requesterName: requester.name,
-          requesterContact: requester.contact,
+          requesterContact: senderContact,
           pickupAddress: _pickup.address,
           pickupLat: _pickup.lat!,
           pickupLng: _pickup.lng!,
@@ -835,16 +901,14 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
           currency: match.currency,
           priceSource: match.priceSource,
           vehicleLabel: match.vehicleLabel,
-          receiverName: _recipientNameController.text.trim(),
-          receiverContactPhone: _recipientPhoneController.text.trim(),
+          receiverName: receiverName,
+          receiverContactPhone: receiverPhone,
         ),
       );
 
       if (!mounted) return;
-      _showMessage(
-        'Demande ${request.trackNum} envoyee a ${match.contactName}.',
-      );
-    } catch (error) {
+      _startWatchingRequest(request: request, match: match);
+    } catch (_) {
       if (!mounted) return;
       _showMessage('Impossible de notifier ce livreur pour le moment.');
     } finally {
@@ -854,6 +918,358 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         _orderingServiceId = null;
       });
     }
+  }
+
+  Future<_ContactConfirmResult?> _showContactConfirmSheet({
+    required String prefillSenderContact,
+    required String prefillReceiverName,
+    required String prefillReceiverPhone,
+  }) async {
+    final TextEditingController senderCtrl =
+        TextEditingController(text: prefillSenderContact);
+    final TextEditingController receiverNameCtrl =
+        TextEditingController(text: prefillReceiverName);
+    final TextEditingController receiverPhoneCtrl =
+        TextEditingController(text: prefillReceiverPhone);
+
+    final _ContactConfirmResult? result =
+        await showModalBottomSheet<_ContactConfirmResult>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: Colors.transparent,
+        builder: (BuildContext sheetCtx) {
+          String? errorText;
+          return StatefulBuilder(
+            builder: (BuildContext ctx, StateSetter setSheetState) {
+              void confirm() {
+                final String sender = senderCtrl.text.trim();
+                final String recName = receiverNameCtrl.text.trim();
+                final String recPhone = receiverPhoneCtrl.text.trim();
+                if (sender.isEmpty) {
+                  setSheetState(() => errorText = 'Saisissez votre numéro de contact.');
+                  return;
+                }
+                if (recPhone.isEmpty) {
+                  setSheetState(() => errorText = 'Saisissez le numéro du destinataire.');
+                  return;
+                }
+                Navigator.of(ctx).pop(
+                  _ContactConfirmResult(
+                    senderContact: sender,
+                    receiverName: recName,
+                    receiverPhone: recPhone,
+                  ),
+                );
+              }
+
+              return Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    24, 0, 24,
+                    MediaQuery.of(ctx).viewInsets.bottom + 28,
+                  ),
+                  child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Center(
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(vertical: 12),
+                        width: 40, height: 4,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFCBD5E1),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
+                    // Header
+                    Row(
+                      children: <Widget>[
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0F766E).withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Icon(Icons.contacts_rounded,
+                              color: Color(0xFF0F766E), size: 22),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              const Text(
+                                'Confirmer les contacts',
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Nécessaire pour que le livreur vous contacte.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    // Sender
+                    const Text('Votre numéro',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF64748B))),
+                    const SizedBox(height: 6),
+                    _inputField(
+                      controller: senderCtrl,
+                      hint: 'Ex: 0700000000',
+                      icon: Icons.person_outline_rounded,
+                      keyboardType: TextInputType.phone,
+                      onChanged: (_) => setSheetState(() => errorText = null),
+                    ),
+                    const SizedBox(height: 16),
+                    // Divider section
+                    Row(children: <Widget>[
+                      const Expanded(child: Divider()),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('Destinataire',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.grey.shade500)),
+                      ),
+                      const Expanded(child: Divider()),
+                    ]),
+                    const SizedBox(height: 16),
+                    _inputField(
+                      controller: receiverNameCtrl,
+                      hint: 'Nom du destinataire (optionnel)',
+                      icon: Icons.badge_outlined,
+                      onChanged: (_) => setSheetState(() => errorText = null),
+                    ),
+                    const SizedBox(height: 12),
+                    _inputField(
+                      controller: receiverPhoneCtrl,
+                      hint: 'Numéro du destinataire',
+                      icon: Icons.call_outlined,
+                      keyboardType: TextInputType.phone,
+                      onChanged: (_) => setSheetState(() => errorText = null),
+                      onSubmitted: (_) => confirm(),
+                    ),
+                    if (errorText != null) ...<Widget>[
+                      const SizedBox(height: 10),
+                      Text(errorText!,
+                          style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFB42318))),
+                    ],
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: FilledButton.icon(
+                        onPressed: confirm,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F766E),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
+                        label: const Text('Confirmer et commander',
+                            style: TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.w800)),
+                      ),
+                    ),
+                  ],
+                ),
+                ), // SingleChildScrollView
+              );
+            },
+          );
+        },
+      );
+
+    // Dispose après 400ms pour couvrir l'animation de fermeture du sheet
+    // (~300ms) avant de libérer les controllers (évite "used after disposed").
+    Future.delayed(const Duration(milliseconds: 400), () {
+      senderCtrl.dispose();
+      receiverNameCtrl.dispose();
+      receiverPhoneCtrl.dispose();
+    });
+
+    return result;
+  }
+
+  Widget _inputField({
+    required TextEditingController controller,
+    required String hint,
+    required IconData icon,
+    TextInputType? keyboardType,
+    ValueChanged<String>? onChanged,
+    ValueChanged<String>? onSubmitted,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      textInputAction:
+          onSubmitted != null ? TextInputAction.done : TextInputAction.next,
+      onChanged: onChanged,
+      onSubmitted: onSubmitted,
+      style: const TextStyle(
+          fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+      decoration: InputDecoration(
+        hintText: hint,
+        prefixIcon: Icon(icon, size: 20, color: const Color(0xFF0F766E)),
+        filled: true,
+        fillColor: const Color(0xFFF8FAFC),
+        hintStyle: const TextStyle(color: Color(0xFFCBD5E1), fontWeight: FontWeight.w500),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Color(0xFF0F766E), width: 1.6),
+        ),
+      ),
+    );
+  }
+
+  void _startWatchingRequest({
+    required ParcelRequestDocument request,
+    required ParcelServiceMatch match,
+  }) {
+    setState(() {
+      _activeRequestId = request.id;
+      _activeTrackNum = request.trackNum;
+      _activeMatch = match;
+      _activeStatus = _SenderRequestStatus.pending;
+      _courierLivePosition = null;
+    });
+    // Étendre le sheet pour afficher le suivi en plein écran
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_sheetController.isAttached) {
+        _sheetController.animateTo(
+          0.62,
+          duration: const Duration(milliseconds: 450),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    });
+    _requestSub?.cancel();
+    _requestSub = _parcelRequestService
+        .watchRequestById(request.id)
+        .listen((ParcelRequestDocument? doc) {
+      if (doc == null || !mounted) return;
+      final _SenderRequestStatus newStatus =
+          _SenderRequestStatus.fromFirestore(doc.status);
+      LatLng? newCourierPos;
+      if (doc.courierLat != null && doc.courierLng != null) {
+        newCourierPos = LatLng(doc.courierLat!, doc.courierLng!);
+      }
+      setState(() {
+        _activeStatus = newStatus;
+        if (newCourierPos != null) _courierLivePosition = newCourierPos;
+      });
+      // Recalcule ETA + bouge la caméra si position mise à jour
+      if (newCourierPos != null && !newStatus.isFinal) {
+        _refreshCourierEta(courierPos: newCourierPos, status: newStatus);
+        _moveCameraToShowCourier(newCourierPos);
+      }
+    });
+  }
+
+  void _stopWatchingRequest() {
+    _requestSub?.cancel();
+    _requestSub = null;
+    setState(() {
+      _activeRequestId = null;
+      _activeTrackNum = null;
+      _activeMatch = null;
+      _activeStatus = _SenderRequestStatus.pending;
+      _courierLivePosition = null;
+      _courierEtaText = null;
+    });
+  }
+
+  Future<void> _refreshCourierEta({
+    required LatLng courierPos,
+    required _SenderRequestStatus status,
+  }) async {
+    // Destination = pickup si le colis n'est pas encore récupéré, sinon livraison
+    final LatLng? dest = status == _SenderRequestStatus.pickedUp
+        ? (_delivery.lat != null && _delivery.lng != null
+            ? LatLng(_delivery.lat!, _delivery.lng!)
+            : null)
+        : (_pickup.lat != null && _pickup.lng != null
+            ? LatLng(_pickup.lat!, _pickup.lng!)
+            : null);
+    if (dest == null) return;
+    try {
+      final RouteResult result = await _routePreviewService.fetchRoute(
+        pickupLat: courierPos.latitude,
+        pickupLng: courierPos.longitude,
+        deliveryLat: dest.latitude,
+        deliveryLng: dest.longitude,
+      );
+      if (!mounted) return;
+      setState(() => _courierEtaText = result.durationText);
+    } catch (_) {}
+  }
+
+  void _moveCameraToShowCourier(LatLng courierPos) {
+    final GoogleMapController? ctrl = _mapController;
+    if (ctrl == null) return;
+    final List<LatLng> points = <LatLng>[courierPos];
+    if (_pickup.lat != null && _pickup.lng != null) {
+      points.add(LatLng(_pickup.lat!, _pickup.lng!));
+    }
+    if (_delivery.lat != null && _delivery.lng != null) {
+      points.add(LatLng(_delivery.lat!, _delivery.lng!));
+    }
+    if (points.length == 1) {
+      ctrl.animateCamera(CameraUpdate.newLatLngZoom(courierPos, 15));
+      return;
+    }
+    final double minLat =
+        points.map((p) => p.latitude).reduce((a, b) => a < b ? a : b);
+    final double maxLat =
+        points.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
+    final double minLng =
+        points.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
+    final double maxLng =
+        points.map((p) => p.longitude).reduce((a, b) => a > b ? a : b);
+    // padding bottom élevé : compense le sheet qui couvre ~62% de l'écran
+    ctrl.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(
+          southwest: LatLng(minLat, minLng),
+          northeast: LatLng(maxLat, maxLng),
+        ),
+        60,
+      ),
+    );
   }
 
   Future<_RequesterIdentity?> _ensureRequesterIdentity() async {
@@ -1225,6 +1641,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         await _handleBack();
       },
       child: Scaffold(
+        resizeToAvoidBottomInset: false,
         body: SafeArea(
           child: Column(
             children: [
@@ -1353,13 +1770,16 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
           ),
         ),
         DraggableScrollableSheet(
+          controller: _sheetController,
           initialChildSize: 0.40,
           minChildSize: 0.28,
-          maxChildSize: 0.82,
+          maxChildSize: 0.92,
           snap: true,
-          snapSizes: const <double>[0.28, 0.40, 0.82],
+          snapSizes: const <double>[0.28, 0.40, 0.62, 0.92],
           builder: (BuildContext ctx, ScrollController scrollController) {
-            return Container(
+            return ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              child: Container(
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -1386,8 +1806,8 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                     ),
                   ),
 
-                  // ── Livreurs (sticky) ─────────────────────────────────
-                  if (_isSearchingMatches || _matches.isNotEmpty || _hasSearchedMatches) ...<Widget>[
+                  // ── Livreurs (sticky) — masqué pendant le suivi ────────
+                  if (_activeRequestId == null && (_isSearchingMatches || _matches.isNotEmpty || _hasSearchedMatches)) ...<Widget>[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
                       child: Row(
@@ -1429,7 +1849,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF6366F1).withValues(alpha: 0.10),
+                                color: const Color(0xFF0F766E).withValues(alpha: 0.10),
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Row(
@@ -1438,7 +1858,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                                   const Icon(
                                     Icons.schedule_rounded,
                                     size: 13,
-                                    color: Color(0xFF6366F1),
+                                    color: Color(0xFF0F766E),
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
@@ -1446,7 +1866,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                                     style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w800,
-                                      color: Color(0xFF6366F1),
+                                      color: Color(0xFF0F766E),
                                     ),
                                   ),
                                 ],
@@ -1528,7 +1948,17 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                     const Divider(height: 1, color: Color(0xFFE2E8F0)),
                   ],
 
-                  // ── Formulaire (scrollable) ────────────────────────────
+                  // ── Waiting / Formulaire ──────────────────────────────
+                  if (_activeRequestId != null)
+                    _WaitingInlineContent(
+                      match: _activeMatch!,
+                      trackNum: _activeTrackNum ?? '',
+                      status: _activeStatus,
+                      etaText: _courierEtaText ?? _routeDurationText,
+                      onClose: _stopWatchingRequest,
+                      scrollController: scrollController,
+                    )
+                  else
                   Expanded(child: ListView(controller: scrollController, padding: EdgeInsets.zero, children: <Widget>[
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -1934,7 +2364,8 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                   ])),
                 ],
               ),
-            );
+            ), // Container
+            ); // ClipRRect
           },
         ),
       ],

@@ -143,6 +143,35 @@ class ParcelRequestService {
     );
   }
 
+  Stream<ParcelRequestDocument?> watchRequestById(String requestId) {
+    final String id = requestId.trim();
+    if (id.isEmpty) return const Stream<ParcelRequestDocument?>.empty();
+    return _firestore
+        .collection('demands')
+        .doc(id)
+        .snapshots()
+        .map((snap) => snap.exists && snap.data() != null
+            ? ParcelRequestDocument.fromMap(snap.id, snap.data()!)
+            : null);
+  }
+
+  Future<void> updateCourierLocation({
+    required String requestId,
+    required double lat,
+    required double lng,
+  }) async {
+    final String id = requestId.trim();
+    if (id.isEmpty) return;
+    await _firestore.collection('demands').doc(id).set(
+      <String, dynamic>{
+        'courierLat': lat,
+        'courierLng': lng,
+        'courierUpdatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+  }
+
   Future<ParcelRequestDocument?> fetchRequestById(String requestId) async {
     final String normalizedRequestId = requestId.trim();
     if (normalizedRequestId.isEmpty) return null;
