@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>144316183618-4orf4trllcmi6c98ovovld17ldlj197e.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.144316183618-4orf4trllcmi6c98ovovld17ldlj197e</string>
+	<key>API_KEY</key>
+	<string>AIzaSyDnQVLwpz8PMKl9yEMGoRcikHD60J2HEU8</string>
+	<key>GCM_SENDER_ID</key>
+	<string>144316183618</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.govipservices</string>
+	<key>PROJECT_ID</key>
+	<string>govip-dev</string>
+	<key>STORAGE_BUCKET</key>
+	<string>govip-dev.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:144316183618:ios:c3a2d57d9ec38ceba5e9db</string>
+</dict>
+</plist>
