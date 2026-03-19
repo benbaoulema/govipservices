@@ -128,7 +128,13 @@ class FcmService {
   }
 
   Future<void> _syncCurrentTokenForUser(User? user) async {
-    final String? token = await _messaging.getToken();
+    final String? token;
+    try {
+      token = await _messaging.getToken();
+    } catch (e) {
+      debugPrint('FCM token unavailable: $e');
+      return;
+    }
     if (token == null || token.trim().isEmpty) return;
     final String installationId =
         await _pushTokenRepository.getOrCreateInstallationId();
