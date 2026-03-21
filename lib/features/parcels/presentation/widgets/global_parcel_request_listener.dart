@@ -205,10 +205,13 @@ Future<void> _handleParcelRequestAction(
       return;
     }
 
-    // Refus : simple update
-    await requestService.updateRequestStatus(
+    // Refus : notifie le sender
+    await requestService.updateRequestStatusAndNotify(
       requestId: request.id,
       status: status,
+      requesterUid: request.requesterUid,
+      providerName: request.providerName,
+      trackNum: request.trackNum,
     );
 
     if (appContext == null || !appContext.mounted) return;
@@ -234,7 +237,7 @@ Future<void> _handleParcelRequestAction(
   }
 }
 
-class _GlobalParcelRequestPopup extends StatelessWidget {
+class _GlobalParcelRequestPopup extends StatefulWidget {
   const _GlobalParcelRequestPopup({
     required this.request,
     required this.onAccept,
@@ -244,6 +247,69 @@ class _GlobalParcelRequestPopup extends StatelessWidget {
   final ParcelRequestDocument request;
   final VoidCallback onAccept;
   final VoidCallback onReject;
+
+  @override
+  State<_GlobalParcelRequestPopup> createState() =>
+      _GlobalParcelRequestPopupState();
+}
+
+class _GlobalParcelRequestPopupState extends State<_GlobalParcelRequestPopup>
+    with SingleTickerProviderStateMixin {
+  static const int _totalSeconds = 90;
+
+  late final AnimationController _timerCtrl;
+  late final Timer _ticker;
+  int _remaining = _totalSeconds;
+  bool _acted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timerCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: _totalSeconds),
+    )..forward();
+
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _remaining--);
+      if (_remaining <= 0) _onTimeout();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker.cancel();
+    _timerCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onTimeout() {
+    if (_acted) return;
+    _acted = true;
+    _ticker.cancel();
+    widget.onReject();
+  }
+
+  void _safeAccept() {
+    if (_acted) return;
+    _acted = true;
+    _ticker.cancel();
+    widget.onAccept();
+  }
+
+  void _safeReject() {
+    if (_acted) return;
+    _acted = true;
+    _ticker.cancel();
+    widget.onReject();
+  }
+
+  Color get _timerColor {
+    if (_remaining > 30) return Colors.white;
+    if (_remaining > 10) return const Color(0xFFFBBF24);
+    return const Color(0xFFF87171);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -256,10 +322,7 @@ class _GlobalParcelRequestPopup extends StatelessWidget {
           gradient: const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: <Color>[
-              Color(0xFF0F766E),
-              Color(0xFF14B8A6),
-            ],
+            colors: <Color>[Color(0xFF0F766E), Color(0xFF14B8A6)],
           ),
           boxShadow: <BoxShadow>[
             BoxShadow(
@@ -275,6 +338,7 @@ class _GlobalParcelRequestPopup extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              // ── En-tête + timer ──────────────────────────────────────
               Row(
                 children: <Widget>[
                   Container(
@@ -301,13 +365,44 @@ class _GlobalParcelRequestPopup extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  // Timer circulaire
+                  SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: <Widget>[
+                        AnimatedBuilder(
+                          animation: _timerCtrl,
+                          builder: (_, __) => CircularProgressIndicator(
+                            value: 1 - _timerCtrl.value,
+                            strokeWidth: 3,
+                            backgroundColor: Colors.white.withValues(alpha: 0.2),
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(_timerColor),
+                          ),
+                        ),
+                        Center(
+                          child: Text(
+                            '$_remaining',
+                            style: TextStyle(
+                              color: _timerColor,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 14),
               Text(
-                request.requesterName.isEmpty
-                    ? 'Un client attend votre reponse.'
-                    : '${request.requesterName} attend votre reponse.',
+                widget.request.requesterName.isEmpty
+                    ? 'Un client attend votre réponse.'
+                    : '${widget.request.requesterName} attend votre réponse.',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 15,
@@ -315,19 +410,18 @@ class _GlobalParcelRequestPopup extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 14),
+              // Prix
               SizedBox(
                 width: double.infinity,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
-                  ),
+                      horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    '${_formatPrice(request.price)} ${request.currency}',
+                    '${_formatPrice(widget.request.price)} ${widget.request.currency}',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: _parcelAccentDark,
@@ -339,43 +433,44 @@ class _GlobalParcelRequestPopup extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 14),
+              // Détails
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(15),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.18)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Ref: ${request.trackNum}',
+                      'Ref: ${widget.request.trackNum}',
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                      ),
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900),
                     ),
                     const SizedBox(height: 10),
                     _ParcelPopupRow(
                       icon: Icons.my_location_outlined,
-                      label: request.pickupAddress,
+                      label: widget.request.pickupAddress,
                     ),
                     const SizedBox(height: 8),
                     _ParcelPopupRow(
                       icon: Icons.flag_outlined,
-                      label: request.deliveryAddress,
+                      label: widget.request.deliveryAddress,
                     ),
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: <Widget>[
-                        if (request.vehicleLabel.isNotEmpty)
+                        if (widget.request.vehicleLabel.isNotEmpty)
                           _ParcelPopupPill(
                             icon: Icons.two_wheeler_outlined,
-                            label: request.vehicleLabel,
+                            label: widget.request.vehicleLabel,
                           ),
                       ],
                     ),
@@ -387,15 +482,15 @@ class _GlobalParcelRequestPopup extends StatelessWidget {
                 children: <Widget>[
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: onReject,
+                      onPressed: _safeReject,
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.white,
-                        side: BorderSide(color: Colors.white.withValues(alpha: 0.46)),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        side: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.46)),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 16),
                         textStyle: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                        ),
+                            fontSize: 16, fontWeight: FontWeight.w800),
                       ),
                       child: const Text('Refuser'),
                     ),
@@ -403,15 +498,14 @@ class _GlobalParcelRequestPopup extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: FilledButton(
-                      onPressed: onAccept,
+                      onPressed: _safeAccept,
                       style: FilledButton.styleFrom(
                         backgroundColor: Colors.white,
                         foregroundColor: _parcelAccentDark,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 16),
                         textStyle: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                        ),
+                            fontSize: 16, fontWeight: FontWeight.w900),
                       ),
                       child: const Text('Accepter'),
                     ),

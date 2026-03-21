@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:govipservices/app/presentation/home_page.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/parcels/domain/models/parcel_request_models.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:govipservices/features/parcels/presentation/pages/offer_service_page.dart';
 import 'package:govipservices/features/parcels/presentation/pages/parcel_delivery_run_page.dart';
+import 'package:govipservices/features/parcels/presentation/pages/parcel_history_page.dart';
 import 'package:govipservices/features/parcels/presentation/pages/ship_package_page.dart';
 import 'package:govipservices/features/parcels/presentation/pages/vip_shopping_page.dart';
 import 'package:govipservices/features/notifications/presentation/pages/notifications_page.dart';
@@ -72,6 +74,22 @@ class AppRouter {
             settings.arguments! as ParcelRequestDocument;
         return MaterialPageRoute<void>(
           builder: (_) => ParcelDeliveryRunPage(request: request),
+          settings: settings,
+        );
+      case AppRoutes.parcelsHistorySender:
+        return MaterialPageRoute<void>(
+          builder: (_) => ParcelsHistoryPage(
+            uid: FirebaseAuth.instance.currentUser?.uid ?? '',
+            role: ParcelHistoryRole.sender,
+          ),
+          settings: settings,
+        );
+      case AppRoutes.parcelsHistoryDriver:
+        return MaterialPageRoute<void>(
+          builder: (_) => ParcelsHistoryPage(
+            uid: FirebaseAuth.instance.currentUser?.uid ?? '',
+            role: ParcelHistoryRole.driver,
+          ),
           settings: settings,
         );
       case AppRoutes.travelAddTrip:

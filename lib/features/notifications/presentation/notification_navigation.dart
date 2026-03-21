@@ -4,7 +4,6 @@ import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/notifications/domain/models/app_notification.dart';
 import 'package:govipservices/features/parcels/data/parcel_request_service.dart';
 import 'package:govipservices/features/parcels/domain/models/parcel_request_models.dart';
-import 'package:govipservices/features/parcels/presentation/widgets/global_parcel_request_listener.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/data/voyage_booking_service.dart';
 import 'package:govipservices/features/travel/domain/models/trip_detail_models.dart';
@@ -89,12 +88,36 @@ class NotificationNavigation {
     if (request == null) return 'Demande colis introuvable.';
     if (!context.mounted) return null;
 
-    await showParcelRequestPopup(
-      context: context,
-      request: request,
-      requestService: _parcelRequestService,
-    );
-    return null;
+    final String currentUid =
+        FirebaseAuth.instance.currentUser?.uid.trim() ?? '';
+    final bool isDriver = request.providerUid == currentUid;
+
+    switch (request.status) {
+      case 'provider_notified':
+        // GlobalParcelRequestListener gère déjà ce popup côté livreur.
+        // Ne pas ouvrir un deuxième popup ici.
+        return null;
+
+      case 'accepted':
+      case 'en_route_to_pickup':
+      case 'picked_up':
+        if (isDriver) {
+          await Navigator.of(context).pushNamed(
+            AppRoutes.parcelsDeliveryRun,
+            arguments: request,
+          );
+        } else {
+          await Navigator.of(context).pushNamed(
+            AppRoutes.parcelsShipPackage,
+            arguments: request.id,
+          );
+        }
+        return null;
+
+      default:
+        // delivered / rejected / cancelled → info uniquement
+        return 'Cette livraison est terminée.';
+    }
   }
 
   Future<String?> _openBooking(

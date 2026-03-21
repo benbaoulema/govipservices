@@ -74,12 +74,24 @@ class _PriceZoneDraft {
     required this.arrivZone,
     required this.price,
     required this.currency,
+    this.departLat,
+    this.departLng,
+    this.departPlaceId,
+    this.arrivLat,
+    this.arrivLng,
+    this.arrivPlaceId,
   });
 
   final String departZone;
   final String arrivZone;
   final double price;
   final _PriceZoneCurrency currency;
+  final double? departLat;
+  final double? departLng;
+  final String? departPlaceId;
+  final double? arrivLat;
+  final double? arrivLng;
+  final String? arrivPlaceId;
 
   bool get isValid =>
       departZone.trim().isNotEmpty &&
@@ -670,6 +682,14 @@ class _OfferServicePageState extends State<OfferServicePage> {
     }
   }
 
+  Map<String, dynamic>? _serializeLatLng({
+    required double? lat,
+    required double? lng,
+  }) {
+    if (lat == null || lng == null) return null;
+    return <String, dynamic>{'lat': lat, 'lng': lng};
+  }
+
   double? get _maxWeightValue {
     final String raw = _maxWeightController.text.trim();
     if (raw.isEmpty) return null;
@@ -835,9 +855,21 @@ class _OfferServicePageState extends State<OfferServicePage> {
         'priceUnit': _priceUnitValue(_priceUnit),
         'priceZones': _priceZones
             .map(
+              // Store a normalized label plus structured geo data when available
+              // so matching can prefer coordinates/place ids over free text.
               (_PriceZoneDraft zone) => <String, dynamic>{
                 'departZone': zone.departZone,
+                'departPlaceId': zone.departPlaceId,
+                'departLatLng': _serializeLatLng(
+                  lat: zone.departLat,
+                  lng: zone.departLng,
+                ),
                 'arrivZone': zone.arrivZone,
+                'arrivPlaceId': zone.arrivPlaceId,
+                'arrivLatLng': _serializeLatLng(
+                  lat: zone.arrivLat,
+                  lng: zone.arrivLng,
+                ),
                 'price': zone.price,
                 'device': _currencyValue(zone.currency),
                 'schedules': null,
@@ -920,6 +952,7 @@ class _OfferServicePageState extends State<OfferServicePage> {
         apiKey: _googleMapsApiKey,
         priceUnit: _priceUnit,
         initialZone: initialZone,
+        defaultDepartSelection: _baseAddress,
         defaultDepartZone: _baseAddress.address,
         prefillArrivalWithBaseAddress: isFirstZone,
         duplicateExists: (_PriceZoneDraft draft) {
@@ -2129,6 +2162,7 @@ class _PriceZoneEditorSheet extends StatefulWidget {
   const _PriceZoneEditorSheet({
     required this.apiKey,
     required this.priceUnit,
+    required this.defaultDepartSelection,
     required this.defaultDepartZone,
     required this.duplicateExists,
     required this.prefillArrivalWithBaseAddress,
@@ -2138,6 +2172,7 @@ class _PriceZoneEditorSheet extends StatefulWidget {
   final String apiKey;
   final _PriceUnit priceUnit;
   final _PriceZoneDraft? initialZone;
+  final _BaseAddressSelection defaultDepartSelection;
   final String defaultDepartZone;
   final bool Function(_PriceZoneDraft draft) duplicateExists;
   final bool prefillArrivalWithBaseAddress;
@@ -2151,6 +2186,8 @@ class _PriceZoneEditorSheetState extends State<_PriceZoneEditorSheet> {
   late final TextEditingController _arrivalController;
   late final TextEditingController _priceController;
 
+  late _BaseAddressSelection _departSelection;
+  late _BaseAddressSelection _arrivalSelection;
   late String _departZone;
   late String _arrivZone;
   late _PriceZoneCurrency _currency;
@@ -2177,6 +2214,29 @@ class _PriceZoneEditorSheetState extends State<_PriceZoneEditorSheet> {
     _departZone = _departController.text.trim();
     _arrivZone = _arrivalController.text.trim();
     _currency = widget.initialZone?.currency ?? _PriceZoneCurrency.xof;
+    _departSelection = _addressSelectionFromZone(
+      address: _departZone,
+      lat: widget.initialZone?.departLat ?? widget.defaultDepartSelection.lat,
+      lng: widget.initialZone?.departLng ?? widget.defaultDepartSelection.lng,
+      placeId:
+          widget.initialZone?.departPlaceId ??
+          widget.defaultDepartSelection.placeId,
+    );
+    _arrivalSelection = _addressSelectionFromZone(
+      address: _arrivZone,
+      lat: widget.initialZone?.arrivLat ??
+          (widget.prefillArrivalWithBaseAddress
+              ? widget.defaultDepartSelection.lat
+              : null),
+      lng: widget.initialZone?.arrivLng ??
+          (widget.prefillArrivalWithBaseAddress
+              ? widget.defaultDepartSelection.lng
+              : null),
+      placeId: widget.initialZone?.arrivPlaceId ??
+          (widget.prefillArrivalWithBaseAddress
+              ? widget.defaultDepartSelection.placeId
+              : null),
+    );
   }
 
   @override
@@ -2196,6 +2256,12 @@ class _PriceZoneEditorSheetState extends State<_PriceZoneEditorSheet> {
       arrivZone: _arrivZone,
       price: parsedPrice ?? 0,
       currency: _currency,
+      departLat: _departSelection.lat,
+      departLng: _departSelection.lng,
+      departPlaceId: _departSelection.placeId,
+      arrivLat: _arrivalSelection.lat,
+      arrivLng: _arrivalSelection.lng,
+      arrivPlaceId: _arrivalSelection.placeId,
     );
 
     if (!draft.isValid) {
@@ -2213,6 +2279,20 @@ class _PriceZoneEditorSheetState extends State<_PriceZoneEditorSheet> {
     }
 
     Navigator.of(context).pop(draft);
+  }
+
+  _BaseAddressSelection _addressSelectionFromZone({
+    required String address,
+    required double? lat,
+    required double? lng,
+    required String? placeId,
+  }) {
+    return _BaseAddressSelection(
+      address: address.trim(),
+      lat: lat,
+      lng: lng,
+      placeId: placeId,
+    );
   }
 
   @override
@@ -2248,12 +2328,22 @@ class _PriceZoneEditorSheetState extends State<_PriceZoneEditorSheet> {
               onChanged: (value) {
                 setState(() {
                   _departZone = value.trim();
+                  _departSelection = _departSelection.copyWith(
+                    address: _departZone,
+                    clearCoordinates: true,
+                  );
                   _errorText = null;
                 });
               },
               onPlaceResolved: (details) {
                 setState(() {
                   _departZone = details.address.trim();
+                  _departSelection = _addressSelectionFromZone(
+                    address: _departZone,
+                    lat: details.lat,
+                    lng: details.lng,
+                    placeId: details.placeId,
+                  );
                   _errorText = null;
                 });
               },
@@ -2267,12 +2357,22 @@ class _PriceZoneEditorSheetState extends State<_PriceZoneEditorSheet> {
               onChanged: (value) {
                 setState(() {
                   _arrivZone = value.trim();
+                  _arrivalSelection = _arrivalSelection.copyWith(
+                    address: _arrivZone,
+                    clearCoordinates: true,
+                  );
                   _errorText = null;
                 });
               },
               onPlaceResolved: (details) {
                 setState(() {
                   _arrivZone = details.address.trim();
+                  _arrivalSelection = _addressSelectionFromZone(
+                    address: _arrivZone,
+                    lat: details.lat,
+                    lng: details.lng,
+                    placeId: details.placeId,
+                  );
                   _errorText = null;
                 });
               },

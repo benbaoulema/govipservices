@@ -232,6 +232,76 @@ class ParcelRequestService {
     await batch.commit();
   }
 
+  /// Annule la demande côté expéditeur tant que le livreur n'est pas encore
+  /// arrivé au point de collecte.
+  Future<void> cancelRequestAndNotifyDriver({
+    required String requestId,
+    required String providerUid,
+    required String requesterName,
+    required String trackNum,
+  }) async {
+    final String id = requestId.trim();
+    if (id.isEmpty) return;
+
+    final String name = requesterName.trim().isNotEmpty ? requesterName.trim() : 'Le client';
+    final String ref = trackNum.trim().isNotEmpty ? ' (${trackNum.trim()})' : '';
+
+    final DocumentReference<Map<String, dynamic>> requestRef =
+        _firestore.collection('demands').doc(id);
+
+    bool cancelled = false;
+    await _firestore.runTransaction((transaction) async {
+      final DocumentSnapshot<Map<String, dynamic>> snap =
+          await transaction.get(requestRef);
+      if (!snap.exists) return;
+
+      final String currentStatus =
+          ((snap.data()?['status'] as String?) ?? '').trim().toLowerCase();
+      const Set<String> cancellableStatuses = <String>{
+        'provider_notified',
+        'accepted',
+        'en_route_to_pickup',
+        'en_route',
+      };
+      if (!cancellableStatuses.contains(currentStatus)) return;
+
+      transaction.set(
+        requestRef,
+        <String, dynamic>{
+          'status': 'cancelled',
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      if (providerUid.trim().isNotEmpty) {
+        transaction.set(
+          _firestore.collection('notifications').doc(),
+          <String, dynamic>{
+            'userId': providerUid.trim(),
+            'installationId': '',
+            'domain': 'parcels',
+            'type': 'parcel_status_updated',
+            'title': 'Demande annulée 🚫',
+            'body': '$name a annulé la demande$ref.',
+            'entityType': 'demand',
+            'entityId': id,
+            'status': 'unread',
+            'data': <String, dynamic>{'status': 'cancelled'},
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+        );
+      }
+
+      cancelled = true;
+    });
+
+    if (!cancelled) {
+      throw StateError('La demande ne peut plus être annulée à ce stade.');
+    }
+  }
+
   Stream<ParcelRequestDocument?> watchRequestById(String requestId) {
     final String id = requestId.trim();
     if (id.isEmpty) return const Stream<ParcelRequestDocument?>.empty();
@@ -261,14 +331,24 @@ class ParcelRequestService {
     );
   }
 
-  /// Stream de la course active en tant que livreur (accepted/en_route/picked_up).
+  /// Stream de la course active en tant que livreur.
+  ///
+  /// Inclut les statuts intermédiaires d'arrivée pour conserver un suivi fin
+  /// jusqu'à la livraison.
   Stream<ParcelRequestDocument?> watchActiveDriverDelivery(String providerUid) {
     final String uid = providerUid.trim();
     if (uid.isEmpty) return Stream<ParcelRequestDocument?>.value(null);
     return _firestore
         .collection('demands')
         .where('providerUid', isEqualTo: uid)
-        .where('status', whereIn: <String>['accepted', 'en_route', 'picked_up'])
+        .where('status', whereIn: <String>[
+          'accepted',
+          'en_route_to_pickup',
+          'en_route',
+          'arrived_at_pickup',
+          'picked_up',
+          'arrived_at_delivery',
+        ])
         .limit(1)
         .snapshots()
         .map((snap) => snap.docs.isEmpty
@@ -277,14 +357,24 @@ class ParcelRequestService {
                 snap.docs.first.id, snap.docs.first.data()));
   }
 
-  /// Stream de la course active en tant qu'expéditeur (accepted/en_route/picked_up).
+  /// Stream de la course active en tant qu'expéditeur.
+  ///
+  /// L'expéditeur voit la même progression métier que le livreur, à l'exception
+  /// des statuts finaux qui quittent ce flux actif.
   Stream<ParcelRequestDocument?> watchActiveSenderDelivery(String requesterUid) {
     final String uid = requesterUid.trim();
     if (uid.isEmpty) return Stream<ParcelRequestDocument?>.value(null);
     return _firestore
         .collection('demands')
         .where('requesterUid', isEqualTo: uid)
-        .where('status', whereIn: <String>['accepted', 'en_route', 'picked_up'])
+        .where('status', whereIn: <String>[
+          'accepted',
+          'en_route_to_pickup',
+          'en_route',
+          'arrived_at_pickup',
+          'picked_up',
+          'arrived_at_delivery',
+        ])
         .limit(1)
         .snapshots()
         .map((snap) => snap.docs.isEmpty
@@ -301,6 +391,44 @@ class ParcelRequestService {
         await _firestore.collection('demands').doc(normalizedRequestId).get();
     if (!snapshot.exists || snapshot.data() == null) return null;
     return ParcelRequestDocument.fromMap(snapshot.id, snapshot.data()!);
+  }
+
+  /// Historique des courses côté expéditeur (toutes statuts finaux).
+  Future<List<ParcelRequestDocument>> fetchSenderHistory(
+    String requesterUid,
+  ) async {
+    final String uid = requesterUid.trim();
+    if (uid.isEmpty) return const <ParcelRequestDocument>[];
+    final QuerySnapshot<Map<String, dynamic>> snap = await _firestore
+        .collection('demands')
+        .where('domain', isEqualTo: 'parcel')
+        .where('requesterUid', isEqualTo: uid)
+        .where('status', whereIn: <String>['delivered', 'rejected', 'cancelled'])
+        .orderBy('createdAt', descending: true)
+        .limit(50)
+        .get();
+    return snap.docs
+        .map((d) => ParcelRequestDocument.fromMap(d.id, d.data()))
+        .toList(growable: false);
+  }
+
+  /// Historique des livraisons côté livreur.
+  Future<List<ParcelRequestDocument>> fetchDriverHistory(
+    String providerUid,
+  ) async {
+    final String uid = providerUid.trim();
+    if (uid.isEmpty) return const <ParcelRequestDocument>[];
+    final QuerySnapshot<Map<String, dynamic>> snap = await _firestore
+        .collection('demands')
+        .where('domain', isEqualTo: 'parcel')
+        .where('providerUid', isEqualTo: uid)
+        .where('status', whereIn: <String>['delivered', 'rejected', 'cancelled'])
+        .orderBy('createdAt', descending: true)
+        .limit(50)
+        .get();
+    return snap.docs
+        .map((d) => ParcelRequestDocument.fromMap(d.id, d.data()))
+        .toList(growable: false);
   }
 
   String _generateTrackingNumber() {
@@ -329,20 +457,37 @@ class _ParcelStatusNotif {
           title: 'Livreur en route 🛵',
           body: '$name a accepté votre demande$ref et se dirige vers vous.',
         );
+      case 'en_route_to_pickup':
       case 'en_route':
         return _ParcelStatusNotif(
           title: 'Livreur en chemin 🛵',
           body: '$name se dirige vers le point de retrait$ref.',
+        );
+      case 'arrived_at_pickup':
+        return _ParcelStatusNotif(
+          title: 'Livreur arrivé au retrait',
+          body:
+              '$name est arrivé au point de retrait$ref et attend la remise du colis.',
         );
       case 'picked_up':
         return _ParcelStatusNotif(
           title: 'Colis récupéré 📦',
           body: '$name a récupéré votre colis$ref et se dirige vers la destination.',
         );
+      case 'arrived_at_delivery':
+        return _ParcelStatusNotif(
+          title: 'Livreur arrivé à destination',
+          body: '$name est arrivé à destination$ref et va remettre le colis.',
+        );
       case 'delivered':
         return _ParcelStatusNotif(
           title: 'Colis livré ✅',
           body: 'Votre colis$ref a été livré avec succès. Merci d\'avoir utilisé GVIP.',
+        );
+      case 'rejected':
+        return _ParcelStatusNotif(
+          title: 'Demande refusée ❌',
+          body: '$name n\'est pas disponible pour votre demande$ref. Veuillez choisir un autre livreur.',
         );
       default:
         return null;

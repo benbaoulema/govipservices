@@ -24,7 +24,7 @@ class DeliveryNotificationService {
     required String deliveryAddress,
     String? etaText,
   }) async {
-    if (status == 'delivered') {
+    if (_isClosedStatus(status)) {
       await cancel();
       return;
     }
@@ -59,7 +59,7 @@ class DeliveryNotificationService {
     required String deliveryAddress,
     String? etaText,
   }) async {
-    if (status == 'delivered') {
+    if (_isClosedStatus(status)) {
       await cancel();
       return;
     }
@@ -138,8 +138,12 @@ class DeliveryNotificationService {
       case 'en_route_to_pickup':
       case 'en_route':
         return 'Direction le point de retrait';
+      case 'arrived_at_pickup':
+        return 'Arrivé au point de retrait';
       case 'picked_up':
         return 'Colis recupere · En livraison';
+      case 'arrived_at_delivery':
+        return 'Arrivé à destination';
       default:
         return 'Course en cours';
     }
@@ -152,10 +156,25 @@ class DeliveryNotificationService {
       case 'en_route_to_pickup':
       case 'en_route':
         return 'Livreur en chemin';
+      case 'arrived_at_pickup':
+        return 'Livreur arrivé au retrait';
       case 'picked_up':
         return 'Colis recupere · En livraison';
+      case 'arrived_at_delivery':
+        return 'Livreur arrivé à destination';
       default:
         return 'Course en cours';
+    }
+  }
+
+  bool _isClosedStatus(String status) {
+    switch (status.toLowerCase()) {
+      case 'delivered':
+      case 'rejected':
+      case 'cancelled':
+        return true;
+      default:
+        return false;
     }
   }
 }

@@ -23,6 +23,7 @@ import 'package:govipservices/features/user/data/user_firestore_repository.dart'
 import 'package:govipservices/features/user/models/app_user.dart';
 import 'package:govipservices/features/user/models/user_phone.dart';
 import 'package:govipservices/features/parcels/presentation/services/delivery_notification_service.dart';
+import 'package:govipservices/features/parcels/presentation/widgets/delivery_completion_dialog.dart';
 import 'package:govipservices/features/user/models/user_role.dart';
 
 
@@ -709,9 +710,11 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         pickupAddress: _pickup.address,
         pickupLat: _pickup.lat!,
         pickupLng: _pickup.lng!,
+        pickupPlaceId: _pickup.placeId,
         deliveryAddress: _delivery.address,
         deliveryLat: _delivery.lat!,
         deliveryLng: _delivery.lng!,
+        deliveryPlaceId: _delivery.placeId,
       );
 
       if (!mounted) return;
@@ -1189,8 +1192,9 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       _activeRequestId = request.id;
       _activeTrackNum = request.trackNum;
       _activeMatch = match;
-      _activeStatus = _SenderRequestStatus.pending;
+      _activeStatus = _SenderRequestStatus.fromFirestore(request.status);
       _courierLivePosition = null;
+      _courierEtaText = null;
     });
     // Étendre le sheet pour afficher le suivi en plein écran
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1205,8 +1209,43 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     _requestSub?.cancel();
     _requestSub = _parcelRequestService
         .watchRequestById(request.id)
-        .listen((ParcelRequestDocument? doc) {
+        .listen((ParcelRequestDocument? doc) async {
       if (doc == null || !mounted) return;
+
+      // Le driver a refusé → retour à la liste, on le retire des propositions
+      if (doc.status == 'rejected') {
+        final String? rejectedUid = _activeMatch?.ownerUid;
+        _requestSub?.cancel();
+        _requestSub = null;
+        DeliveryNotificationService.instance.cancel();
+        if (!mounted) return;
+        setState(() {
+          _activeRequestId = null;
+          _activeTrackNum = null;
+          _activeMatch = null;
+          _activeStatus = _SenderRequestStatus.pending;
+          _courierLivePosition = null;
+          _courierEtaText = null;
+          if (rejectedUid != null) {
+            _matches = _matches
+                .where((m) => m.ownerUid != rejectedUid)
+                .toList(growable: false);
+          }
+        });
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: Color(0xFF991B1B),
+              content: Text(
+                'Ce livreur n\'est pas disponible. Choisissez-en un autre.',
+              ),
+            ),
+          );
+        return;
+      }
+
       final _SenderRequestStatus newStatus =
           _SenderRequestStatus.fromFirestore(doc.status);
       LatLng? newCourierPos;
@@ -1216,6 +1255,11 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       setState(() {
         _activeStatus = newStatus;
         if (newCourierPos != null) _courierLivePosition = newCourierPos;
+        if (newStatus == _SenderRequestStatus.arrivedAtPickup ||
+            newStatus == _SenderRequestStatus.arrivedAtDelivery ||
+            newStatus.isFinal) {
+          _courierEtaText = null;
+        }
       });
       // Mettre à jour la notification persistante
       DeliveryNotificationService.instance.showForSender(
@@ -1226,8 +1270,21 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         deliveryAddress: doc.deliveryAddress,
         etaText: _courierEtaText,
       );
+      // Popup de fin de course quand livraison effectuée
+      if (newStatus.isFinal) {
+        _requestSub?.cancel();
+        DeliveryNotificationService.instance.cancel();
+        await showDeliveryCompletionDialog(
+          context,
+          trackNum: doc.trackNum,
+          price: doc.price,
+          currency: doc.currency,
+          role: DeliveryCompletionRole.sender,
+        );
+        return;
+      }
       // Recalcule ETA + bouge la caméra si position mise à jour
-      if (newCourierPos != null && !newStatus.isFinal) {
+      if (newCourierPos != null) {
         _refreshCourierEta(courierPos: newCourierPos, status: newStatus);
         _moveCameraToShowCourier(newCourierPos);
       }
@@ -1240,6 +1297,41 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       pickupAddress: request.pickupAddress,
       deliveryAddress: request.deliveryAddress,
     );
+  }
+
+  Future<void> _cancelRequest() async {
+    final String? requestId = _activeRequestId;
+    final String? providerUid = _activeMatch?.ownerUid;
+    final String trackNum = _activeTrackNum ?? '';
+    if (requestId == null) return;
+
+    try {
+      final String requesterName =
+          FirebaseAuth.instance.currentUser?.displayName?.trim() ?? '';
+      await _parcelRequestService.cancelRequestAndNotifyDriver(
+        requestId: requestId,
+        providerUid: providerUid ?? '',
+        requesterName: requesterName,
+        trackNum: trackNum,
+      );
+      if (!mounted) return;
+      _stopWatchingRequest();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: const Color(0xFF991B1B),
+            content: Text(
+              error is StateError
+                  ? error.message ?? 'La demande ne peut plus être annulée.'
+                  : 'Impossible d’annuler la demande pour le moment.',
+            ),
+          ),
+        );
+    }
   }
 
   void _stopWatchingRequest() {
@@ -1260,8 +1352,9 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     required LatLng courierPos,
     required _SenderRequestStatus status,
   }) async {
-    // Destination = pickup si le colis n'est pas encore récupéré, sinon livraison
-    final LatLng? dest = status == _SenderRequestStatus.pickedUp
+    // Destination = pickup tant que le colis n'est pas recupere.
+    final LatLng? dest = status == _SenderRequestStatus.pickedUp ||
+            status == _SenderRequestStatus.arrivedAtDelivery
         ? (_delivery.lat != null && _delivery.lng != null
             ? LatLng(_delivery.lat!, _delivery.lng!)
             : null)
@@ -2013,6 +2106,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                       status: _activeStatus,
                       etaText: _courierEtaText ?? _routeDurationText,
                       onClose: _stopWatchingRequest,
+                      onCancel: _cancelRequest,
                       scrollController: scrollController,
                     )
                   else

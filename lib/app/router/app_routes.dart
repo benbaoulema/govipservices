@@ -10,6 +10,8 @@ class AppRoutes {
   static const String parcelsVipShopping = '/parcels/vip-shopping';
   static const String parcelsOfferService = '/parcels/offer-service';
   static const String parcelsDeliveryRun = '/parcels/delivery-run';
+  static const String parcelsHistorySender = '/parcels/history-sender';
+  static const String parcelsHistoryDriver = '/parcels/history-driver';
 
   static const String travelAddTrip = '/travel/add-trip';
   static const String travelBookTrip = '/travel/book-trip';

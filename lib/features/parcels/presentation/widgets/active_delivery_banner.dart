@@ -207,14 +207,23 @@ class _BannerCardState extends State<_BannerCard>
         return widget.delivery.role == _ActiveDeliveryRole.driver
             ? 'En route vers le colis'
             : 'Livreur en route';
+      case 'en_route_to_pickup':
       case 'en_route':
         return widget.delivery.role == _ActiveDeliveryRole.driver
             ? 'En route vers le point de retrait'
             : 'Livreur en chemin';
+      case 'arrived_at_pickup':
+        return widget.delivery.role == _ActiveDeliveryRole.driver
+            ? 'Arrivé au point de retrait'
+            : 'Livreur arrivé au retrait';
       case 'picked_up':
         return widget.delivery.role == _ActiveDeliveryRole.driver
-            ? 'Colis recupere - en livraison'
-            : 'Colis recupere';
+            ? 'Colis récupéré - en livraison'
+            : 'Colis récupéré';
+      case 'arrived_at_delivery':
+        return widget.delivery.role == _ActiveDeliveryRole.driver
+            ? 'Arrivé à destination'
+            : 'Livreur arrivé à destination';
       default:
         return 'Course en cours';
     }
@@ -222,7 +231,11 @@ class _BannerCardState extends State<_BannerCard>
 
   String get _destinationLabel {
     final ParcelRequestDocument req = widget.delivery.request;
-    return widget.delivery.role == _ActiveDeliveryRole.driver
+    final String status = req.status.toLowerCase();
+    final bool headingToDelivery = status == 'picked_up' ||
+        status == 'arrived_at_delivery' ||
+        status == 'delivered';
+    return widget.delivery.role == _ActiveDeliveryRole.driver || headingToDelivery
         ? req.deliveryAddress
         : req.pickupAddress;
   }

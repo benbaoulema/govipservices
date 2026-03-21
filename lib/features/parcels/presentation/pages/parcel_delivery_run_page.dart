@@ -12,42 +12,53 @@ import 'package:govipservices/features/parcels/data/parcel_request_service.dart'
 import 'package:govipservices/features/parcels/presentation/services/delivery_notification_service.dart';
 import 'package:govipservices/features/parcels/data/parcel_route_preview_service.dart';
 import 'package:govipservices/features/parcels/domain/models/parcel_request_models.dart';
+import 'package:govipservices/features/parcels/presentation/widgets/delivery_completion_dialog.dart';
 
-// ─── Statuts de la course ────────────────────────────────────────────────────
-
+/// Statuts métier de la course côté livreur.
+///
+/// Le livreur valide explicitement les arrivées et les remises pour que
+/// l'expéditeur voie une progression fiable et exploitable dans le suivi.
 enum _RunStatus {
   accepted,
   enRouteToPickup,
+  arrivedAtPickup,
   pickedUp,
+  arrivedAtDelivery,
   delivered;
-
   static _RunStatus fromString(String value) {
     switch (value) {
       case 'en_route_to_pickup':
+      case 'en_route':
         return _RunStatus.enRouteToPickup;
+      case 'arrived_at_pickup':
+        return _RunStatus.arrivedAtPickup;
       case 'picked_up':
         return _RunStatus.pickedUp;
+      case 'arrived_at_delivery':
+        return _RunStatus.arrivedAtDelivery;
       case 'delivered':
         return _RunStatus.delivered;
       default:
         return _RunStatus.accepted;
     }
   }
-
   String get firestoreValue {
     switch (this) {
       case _RunStatus.accepted:
         return 'accepted';
       case _RunStatus.enRouteToPickup:
         return 'en_route_to_pickup';
+      case _RunStatus.arrivedAtPickup:
+        return 'arrived_at_pickup';
       case _RunStatus.pickedUp:
         return 'picked_up';
+      case _RunStatus.arrivedAtDelivery:
+        return 'arrived_at_delivery';
       case _RunStatus.delivered:
         return 'delivered';
     }
   }
 }
-
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 class ParcelDeliveryRunPage extends StatefulWidget {
@@ -169,7 +180,7 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
       if (!mounted) return;
       final bool needsRoute = _routePoints.isEmpty &&
           _status != _RunStatus.delivered &&
-          _status != _RunStatus.pickedUp;
+          _status != _RunStatus.arrivedAtDelivery;
       setState(() => _courierPosition = pos);
       if (needsRoute) _refreshRoute();
       if (_status != _RunStatus.delivered) {
@@ -189,7 +200,8 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
     try {
       final RouteResult result;
 
-      if (_status == _RunStatus.pickedUp) {
+      if (_status == _RunStatus.pickedUp ||
+          _status == _RunStatus.arrivedAtDelivery) {
         // Phase 2 : pickup → livraison
         if (widget.request.pickupLat == 0 && widget.request.deliveryLat == 0) {
           result = const RouteResult(points: <LatLng>[]);
@@ -332,42 +344,51 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
   _RunStatus? get _nextStatus {
     switch (_status) {
       case _RunStatus.accepted:
-        return _RunStatus.enRouteToPickup;
+        return _RunStatus.arrivedAtPickup;
       case _RunStatus.enRouteToPickup:
+        return _RunStatus.arrivedAtPickup;
+      case _RunStatus.arrivedAtPickup:
         return _RunStatus.pickedUp;
       case _RunStatus.pickedUp:
+        return _RunStatus.arrivedAtDelivery;
+      case _RunStatus.arrivedAtDelivery:
         return _RunStatus.delivered;
       case _RunStatus.delivered:
         return null;
     }
   }
-
   String get _statusButtonLabel {
     switch (_status) {
       case _RunStatus.accepted:
-        return 'Démarrer – Aller au départ';
+        return 'Arrivé au point de collecte';
       case _RunStatus.enRouteToPickup:
+        return 'Arrivé au point de collecte';
+      case _RunStatus.arrivedAtPickup:
         return 'Colis récupéré';
       case _RunStatus.pickedUp:
+        return 'Arrivé à destination';
+      case _RunStatus.arrivedAtDelivery:
         return 'Livraison effectuée';
       case _RunStatus.delivered:
         return 'Terminé';
     }
   }
-
   IconData get _statusButtonIcon {
     switch (_status) {
       case _RunStatus.accepted:
-        return Icons.navigation_rounded;
+        return Icons.place_rounded;
       case _RunStatus.enRouteToPickup:
+        return Icons.place_rounded;
+      case _RunStatus.arrivedAtPickup:
         return Icons.inventory_2_rounded;
       case _RunStatus.pickedUp:
+        return Icons.location_on_rounded;
+      case _RunStatus.arrivedAtDelivery:
         return Icons.flag_rounded;
       case _RunStatus.delivered:
         return Icons.check_circle_rounded;
     }
   }
-
   Future<void> _advanceStatus() async {
     final _RunStatus? next = _nextStatus;
     if (next == null || _isUpdatingStatus) return;
@@ -395,13 +416,19 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
       );
 
       if (next == _RunStatus.delivered) {
-        await Future<void>.delayed(const Duration(milliseconds: 800));
-        if (mounted) Navigator.of(context).pop();
+        if (!mounted) return;
+        await showDeliveryCompletionDialog(
+          context,
+          trackNum: widget.request.trackNum,
+          price: widget.request.price,
+          currency: widget.request.currency,
+          role: DeliveryCompletionRole.driver,
+        );
         return;
       }
 
       // Retracer l'itinéraire si on vient de récupérer le colis
-      if (next == _RunStatus.pickedUp) {
+      if (next != _RunStatus.delivered) {
         await _refreshRoute();
       }
     } catch (_) {
@@ -425,26 +452,32 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
       case _RunStatus.accepted:
       case _RunStatus.enRouteToPickup:
         return 'Aller au départ';
+      case _RunStatus.arrivedAtPickup:
+        return 'Au point de collecte';
       case _RunStatus.pickedUp:
         return 'En route vers la livraison';
+      case _RunStatus.arrivedAtDelivery:
+        return 'Arrivé à destination';
       case _RunStatus.delivered:
         return 'Livraison effectuée';
     }
   }
-
   Color _phaseColor() {
     switch (_status) {
       case _RunStatus.accepted:
         return const Color(0xFFF59E0B);
       case _RunStatus.enRouteToPickup:
         return _teal;
+      case _RunStatus.arrivedAtPickup:
+        return const Color(0xFFF97316);
       case _RunStatus.pickedUp:
         return const Color(0xFF3B82F6);
+      case _RunStatus.arrivedAtDelivery:
+        return const Color(0xFF2563EB);
       case _RunStatus.delivered:
         return const Color(0xFF10B981);
     }
   }
-
   Future<void> _openNavigation(double lat, double lng) async {
     final Uri uri = Uri.parse(
       'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
@@ -719,7 +752,8 @@ class _DeliverySheet extends StatelessWidget {
                   GestureDetector(
                     onTap: () {
                       final bool toPickup = status == _RunStatus.accepted ||
-                          status == _RunStatus.enRouteToPickup;
+                          status == _RunStatus.enRouteToPickup ||
+                          status == _RunStatus.arrivedAtPickup;
                       onNavigate(
                         toPickup ? request.pickupLat : request.deliveryLat,
                         toPickup ? request.pickupLng : request.deliveryLng,
@@ -1196,3 +1230,4 @@ String _formatPrice(double value) {
   if (value == value.roundToDouble()) return value.toInt().toString();
   return value.toStringAsFixed(0);
 }
+

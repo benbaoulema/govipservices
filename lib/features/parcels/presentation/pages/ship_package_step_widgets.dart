@@ -15,19 +15,29 @@ class _ContactConfirmResult {
 
 // ── Waiting for driver sheet ───────────────────────────────────────────────────
 
-/// Statut simplifié côté sender (différent de _RunStatus qui est côté livreur).
+/// Statut simplifié côté expéditeur.
+///
+/// L'expéditeur suit un cycle plus détaillé pour savoir si le livreur est
+/// simplement en chemin, déjà arrivé au point de collecte, ou déjà arrivé à
+/// destination.
 enum _SenderRequestStatus {
   pending,      // provider_notified
   accepted,     // accepted
   enRoute,      // en_route_to_pickup
+  arrivedAtPickup, // arrived_at_pickup
   pickedUp,     // picked_up
+  arrivedAtDelivery, // arrived_at_delivery
   delivered;    // delivered
 
   static _SenderRequestStatus fromFirestore(String? value) {
     switch (value) {
       case 'accepted':           return _SenderRequestStatus.accepted;
       case 'en_route_to_pickup': return _SenderRequestStatus.enRoute;
+      case 'en_route':           return _SenderRequestStatus.enRoute;
+      case 'arrived_at_pickup':  return _SenderRequestStatus.arrivedAtPickup;
       case 'picked_up':          return _SenderRequestStatus.pickedUp;
+      case 'arrived_at_delivery':
+        return _SenderRequestStatus.arrivedAtDelivery;
       case 'delivered':          return _SenderRequestStatus.delivered;
       default:                   return _SenderRequestStatus.pending;
     }
@@ -41,14 +51,33 @@ enum _SenderRequestStatus {
         return 'accepted';
       case _SenderRequestStatus.enRoute:
         return 'en_route_to_pickup';
+      case _SenderRequestStatus.arrivedAtPickup:
+        return 'arrived_at_pickup';
       case _SenderRequestStatus.pickedUp:
         return 'picked_up';
+      case _SenderRequestStatus.arrivedAtDelivery:
+        return 'arrived_at_delivery';
       case _SenderRequestStatus.delivered:
         return 'delivered';
     }
   }
 
   bool get isFinal => this == _SenderRequestStatus.delivered;
+
+  /// L'expéditeur peut annuler tant que le livreur n'est pas arrivé au pickup.
+  bool get canSenderCancel {
+    switch (this) {
+      case _SenderRequestStatus.pending:
+      case _SenderRequestStatus.accepted:
+      case _SenderRequestStatus.enRoute:
+        return true;
+      case _SenderRequestStatus.arrivedAtPickup:
+      case _SenderRequestStatus.pickedUp:
+      case _SenderRequestStatus.arrivedAtDelivery:
+      case _SenderRequestStatus.delivered:
+        return false;
+    }
+  }
 }
 
 class _StatusStep {
@@ -84,10 +113,22 @@ const List<_StatusStep> _kStatusSteps = <_StatusStep>[
     sublabel: 'Il arrive au lieu de récupération.',
   ),
   _StatusStep(
+    status: _SenderRequestStatus.arrivedAtPickup,
+    icon: '📍',
+    label: 'Livreur arrivé',
+    sublabel: 'Le livreur est sur place pour récupérer le colis.',
+  ),
+  _StatusStep(
     status: _SenderRequestStatus.pickedUp,
     icon: '📦',
     label: 'Colis récupéré',
     sublabel: 'Votre colis est en route vers la destination.',
+  ),
+  _StatusStep(
+    status: _SenderRequestStatus.arrivedAtDelivery,
+    icon: '🏁',
+    label: 'Livreur arrivé à destination',
+    sublabel: 'Le livreur est sur place pour remettre le colis.',
   ),
   _StatusStep(
     status: _SenderRequestStatus.delivered,
@@ -106,6 +147,7 @@ class _WaitingInlineContent extends StatefulWidget {
     required this.status,
     required this.onClose,
     required this.scrollController,
+    this.onCancel,
     this.etaText,
   });
 
@@ -113,6 +155,7 @@ class _WaitingInlineContent extends StatefulWidget {
   final String trackNum;
   final _SenderRequestStatus status;
   final VoidCallback onClose;
+  final VoidCallback? onCancel;
   final ScrollController scrollController;
   final String? etaText;
 
@@ -145,8 +188,15 @@ class _WaitingInlineContentState extends State<_WaitingInlineContent>
     super.dispose();
   }
 
+  _SenderRequestStatus get _timelineStatus {
+    if (widget.status == _SenderRequestStatus.enRoute) {
+      return _SenderRequestStatus.accepted;
+    }
+    return widget.status;
+  }
+
   int get _currentIndex =>
-      _kStatusSteps.indexWhere((s) => s.status == widget.status);
+      _kStatusSteps.indexWhere((s) => s.status == _timelineStatus);
 
   @override
   Widget build(BuildContext context) {
@@ -156,7 +206,7 @@ class _WaitingInlineContentState extends State<_WaitingInlineContent>
         controller: widget.scrollController,
         padding: EdgeInsets.fromLTRB(20, 12, 20, bottomPad),
         children: <Widget>[
-          _CourierProgressTrack(status: widget.status),
+          _CourierProgressTrack(status: _timelineStatus),
           const SizedBox(height: 12),
           _DriverCard(
             match: widget.match,
@@ -175,28 +225,33 @@ class _WaitingInlineContentState extends State<_WaitingInlineContent>
               isCurrent: isCurrent,
               isLast: isLast,
               pulseAnim:
-                  isCurrent && !widget.status.isFinal ? _pulseAnim : null,
+                  isCurrent && !_timelineStatus.isFinal ? _pulseAnim : null,
             );
           }),
           const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: widget.status.isFinal
-                ? FilledButton.icon(
-                    onPressed: widget.onClose,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _teal,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    icon: const Icon(Icons.check_rounded, size: 18),
-                    label: const Text('Fermer',
-                        style: TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w800)),
-                  )
-                : OutlinedButton(
+          if (widget.status.isFinal)
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: FilledButton.icon(
+                onPressed: widget.onClose,
+                style: FilledButton.styleFrom(
+                  backgroundColor: _teal,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                icon: const Icon(Icons.check_rounded, size: 18),
+                label: const Text('Fermer',
+                    style:
+                        TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+              ),
+            )
+          else
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: OutlinedButton(
                     onPressed: widget.onClose,
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(
@@ -211,7 +266,29 @@ class _WaitingInlineContentState extends State<_WaitingInlineContent>
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF64748B))),
                   ),
-          ),
+                ),
+                if (widget.onCancel != null &&
+                    widget.status.canSenderCancel) ...<Widget>[
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: widget.onCancel,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFDC2626),
+                        side: const BorderSide(
+                            color: Color(0xFFDC2626), width: 1.5),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: const Text('Annuler',
+                          style: TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ],
+              ],
+            ),
         ],
       ),
     );
@@ -229,7 +306,9 @@ class _CourierProgressTrack extends StatelessWidget {
       case _SenderRequestStatus.pending:   return 0.05;
       case _SenderRequestStatus.accepted:  return 0.22;
       case _SenderRequestStatus.enRoute:   return 0.45;
+      case _SenderRequestStatus.arrivedAtPickup: return 0.58;
       case _SenderRequestStatus.pickedUp:  return 0.72;
+      case _SenderRequestStatus.arrivedAtDelivery: return 0.9;
       case _SenderRequestStatus.delivered: return 1.0;
     }
   }
