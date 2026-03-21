@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -8,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/features/parcels/data/parcel_request_service.dart';
+import 'package:govipservices/features/parcels/presentation/services/delivery_notification_service.dart';
 import 'package:govipservices/features/parcels/data/parcel_route_preview_service.dart';
 import 'package:govipservices/features/parcels/domain/models/parcel_request_models.dart';
 
@@ -85,11 +87,19 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
       apiKey: RuntimeAppConfig.googleMapsApiKey,
     );
     _status = _RunStatus.fromString(widget.request.status);
+    DeliveryNotificationService.instance.showForDriver(
+      requestId: widget.request.id,
+      status: widget.request.status,
+      trackNum: widget.request.trackNum,
+      pickupAddress: widget.request.pickupAddress,
+      deliveryAddress: widget.request.deliveryAddress,
+    );
     _init();
   }
 
   @override
   void dispose() {
+    DeliveryNotificationService.instance.cancel();
     _positionStream?.cancel();
     _mapController?.dispose();
     super.dispose();
@@ -211,6 +221,14 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
         _routePoints = result.points;
         _routeDurationText = result.durationText;
       });
+      DeliveryNotificationService.instance.showForDriver(
+        requestId: widget.request.id,
+        status: _status.firestoreValue,
+        trackNum: widget.request.trackNum,
+        pickupAddress: widget.request.pickupAddress,
+        deliveryAddress: widget.request.deliveryAddress,
+        etaText: result.durationText,
+      );
       _fitMapToBounds();
     } finally {
       if (mounted) setState(() => _isLoadingRoute = false);
@@ -357,12 +375,24 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
     setState(() => _isUpdatingStatus = true);
 
     try {
-      await _requestService.updateRequestStatus(
+      await _requestService.updateRequestStatusAndNotify(
         requestId: widget.request.id,
         status: next.firestoreValue,
+        requesterUid: widget.request.requesterUid,
+        providerName: widget.request.providerName,
+        trackNum: widget.request.trackNum,
       );
       if (!mounted) return;
       setState(() => _status = next);
+
+      // Mettre à jour la notification persistante
+      DeliveryNotificationService.instance.showForDriver(
+        requestId: widget.request.id,
+        status: next.firestoreValue,
+        trackNum: widget.request.trackNum,
+        pickupAddress: widget.request.pickupAddress,
+        deliveryAddress: widget.request.deliveryAddress,
+      );
 
       if (next == _RunStatus.delivered) {
         await Future<void>.delayed(const Duration(milliseconds: 800));
@@ -462,7 +492,9 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
               child: Row(
                 children: <Widget>[
                   _MapButton(
-                    icon: Icons.arrow_back_rounded,
+                    icon: Platform.isIOS
+                        ? Icons.chevron_left
+                        : Icons.arrow_back_rounded,
                     onTap: () => Navigator.of(context).maybePop(),
                   ),
                   const SizedBox(width: 10),

@@ -9,6 +9,7 @@ const messaging = admin.messaging();
 
 const PUSH_TYPES = new Set([
   "parcel_request_created",
+  "parcel_status_updated",
   "booking_created",
   "booking_status_updated",
   "booking_cancelled",

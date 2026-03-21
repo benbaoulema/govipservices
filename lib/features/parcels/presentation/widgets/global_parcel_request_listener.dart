@@ -32,6 +32,8 @@ class _GlobalParcelRequestListenerState
   Set<String> _knownRequestIds = <String>{};
   bool _hasPrimedRequests = false;
   bool _isDialogVisible = false;
+  // ID de la demande actuellement affichée dans le popup
+  String? _activePopupRequestId;
 
   @override
   void initState() {
@@ -54,6 +56,7 @@ class _GlobalParcelRequestListenerState
     _knownRequestIds = <String>{};
     _hasPrimedRequests = false;
     _pendingQueue.clear();
+    _activePopupRequestId = null;
 
     final String uid = user?.uid.trim() ?? '';
     if (uid.isEmpty) return;
@@ -64,13 +67,30 @@ class _GlobalParcelRequestListenerState
   }
 
   void _handlePendingRequestsChanged(List<ParcelRequestDocument> requests) {
+    final Set<String> currentIds = requests.map((r) => r.id).toSet();
+
+    // Si le popup actif a été traité sur un autre appareil → le fermer
+    if (_activePopupRequestId != null &&
+        !currentIds.contains(_activePopupRequestId) &&
+        _isDialogVisible) {
+      final BuildContext? ctx = rootNavigatorKey.currentContext;
+      if (ctx != null) {
+        Navigator.of(ctx, rootNavigator: true).maybePop();
+      }
+      _isDialogVisible = false;
+      _activePopupRequestId = null;
+    }
+
+    // Nettoyer la queue des demandes déjà traitées ailleurs
+    _pendingQueue.removeWhere((r) => !currentIds.contains(r.id));
+
     final List<ParcelRequestDocument> newRequests = _hasPrimedRequests
         ? requests
             .where((request) => !_knownRequestIds.contains(request.id))
             .toList(growable: false)
         : const <ParcelRequestDocument>[];
 
-    _knownRequestIds = requests.map((request) => request.id).toSet();
+    _knownRequestIds = currentIds;
     _hasPrimedRequests = true;
 
     if (newRequests.isEmpty) return;
@@ -89,6 +109,7 @@ class _GlobalParcelRequestListenerState
 
     final ParcelRequestDocument request = _pendingQueue.removeFirst();
     _isDialogVisible = true;
+    _activePopupRequestId = request.id;
 
     showParcelRequestPopup(
       context: dialogContext,
@@ -96,6 +117,7 @@ class _GlobalParcelRequestListenerState
       requestService: _requestService,
     ).whenComplete(() {
       _isDialogVisible = false;
+      _activePopupRequestId = null;
       _showNextPopupIfIdle();
     });
   }
@@ -146,12 +168,13 @@ Future<void> _handleParcelRequestAction(
 
   final BuildContext? appContext = rootNavigatorKey.currentContext;
   try {
-    await requestService.updateRequestStatus(
-      requestId: request.id,
-      status: status,
-    );
-
     if (status == 'accepted') {
+      // Transaction atomique : n'accepte que si encore en attente
+      final bool accepted = await requestService.acceptRequest(request.id);
+      if (!accepted) {
+        // Déjà acceptée sur un autre appareil — ignorer silencieusement
+        return;
+      }
       if (appContext == null || !appContext.mounted) return;
       await Navigator.of(appContext).pushNamed(
         AppRoutes.parcelsDeliveryRun,
@@ -182,13 +205,19 @@ Future<void> _handleParcelRequestAction(
       return;
     }
 
+    // Refus : simple update
+    await requestService.updateRequestStatus(
+      requestId: request.id,
+      status: status,
+    );
+
     if (appContext == null || !appContext.mounted) return;
     ScaffoldMessenger.of(appContext)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         const SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text('Demande colis refusee.'),
+          content: Text('Demande colis refusée.'),
         ),
       );
   } catch (_) {
@@ -199,7 +228,7 @@ Future<void> _handleParcelRequestAction(
         const SnackBar(
           behavior: SnackBarBehavior.floating,
           backgroundColor: Color(0xFF991B1B),
-          content: Text('Mise a jour impossible pour le moment.'),
+          content: Text('Mise à jour impossible pour le moment.'),
         ),
       );
   }

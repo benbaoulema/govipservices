@@ -1,13 +1,37 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:govipservices/app/navigation/app_navigator.dart';
+import 'package:govipservices/app/navigation/parcel_live_activity_deep_link_service.dart';
 import 'package:govipservices/app/presentation/intro_page.dart';
 import 'package:govipservices/app/router/app_router.dart';
+import 'package:govipservices/features/parcels/presentation/widgets/active_delivery_banner.dart';
 import 'package:govipservices/features/parcels/presentation/widgets/global_parcel_request_listener.dart';
 import 'package:govipservices/features/travel/presentation/widgets/global_booking_request_listener.dart';
 
-class GoVipApp extends StatelessWidget {
+class GoVipApp extends StatefulWidget {
   const GoVipApp({super.key});
+
+  @override
+  State<GoVipApp> createState() => _GoVipAppState();
+}
+
+class _GoVipAppState extends State<GoVipApp> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ParcelLiveActivityDeepLinkService.instance.initialize();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const _GoVipAppView();
+  }
+}
+
+class _GoVipAppView extends StatelessWidget {
+  const _GoVipAppView();
 
   static const Color _turquoise = Color(0xFF14B8A6);
   static const Color _turquoiseDark = Color(0xFF0F766E);
@@ -16,6 +40,7 @@ class GoVipApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: rootNavigatorKey,
+      navigatorObservers: <NavigatorObserver>[rootRouteObserver],
       title: 'GoVIP Services',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -32,14 +57,14 @@ class GoVipApp extends StatelessWidget {
             (states) => IconThemeData(
               color: states.contains(WidgetState.selected)
                   ? Colors.white
-                  : Colors.white.withOpacity(0.8),
+                  : Colors.white.withValues(alpha: 0.8),
             ),
           ),
           labelTextStyle: WidgetStateProperty.resolveWith<TextStyle?>(
             (states) => TextStyle(
               color: states.contains(WidgetState.selected)
                   ? Colors.white
-                  : Colors.white.withOpacity(0.82),
+                  : Colors.white.withValues(alpha: 0.82),
               fontWeight: states.contains(WidgetState.selected)
                   ? FontWeight.w700
                   : FontWeight.w600,
@@ -72,9 +97,11 @@ class GoVipApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      builder: (context, child) => GlobalParcelRequestListener(
-        child: GlobalBookingRequestListener(
-          child: child ?? const SizedBox.shrink(),
+      builder: (context, child) => ActiveDeliveryBanner(
+        child: GlobalParcelRequestListener(
+          child: GlobalBookingRequestListener(
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
       home: const IntroGatePage(),

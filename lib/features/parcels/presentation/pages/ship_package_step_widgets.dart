@@ -33,6 +33,21 @@ enum _SenderRequestStatus {
     }
   }
 
+  String get firestoreValue {
+    switch (this) {
+      case _SenderRequestStatus.pending:
+        return 'provider_notified';
+      case _SenderRequestStatus.accepted:
+        return 'accepted';
+      case _SenderRequestStatus.enRoute:
+        return 'en_route_to_pickup';
+      case _SenderRequestStatus.pickedUp:
+        return 'picked_up';
+      case _SenderRequestStatus.delivered:
+        return 'delivered';
+    }
+  }
+
   bool get isFinal => this == _SenderRequestStatus.delivered;
 }
 

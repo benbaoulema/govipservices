@@ -125,6 +125,18 @@ class FcmService {
         importance: Importance.high,
       ),
     );
+    // Canal pour la notification persistante de course en cours
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'delivery_ongoing',
+        'Course en cours',
+        description: 'Suivi de votre livraison en temps réel.',
+        importance: Importance.low,
+        playSound: false,
+        enableVibration: false,
+        showBadge: false,
+      ),
+    );
   }
 
   Future<void> _syncCurrentTokenForUser(User? user) async {

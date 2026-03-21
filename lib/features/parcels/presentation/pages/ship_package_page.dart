@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -21,6 +22,7 @@ import 'package:govipservices/features/travel/presentation/widgets/address_autoc
 import 'package:govipservices/features/user/data/user_firestore_repository.dart';
 import 'package:govipservices/features/user/models/app_user.dart';
 import 'package:govipservices/features/user/models/user_phone.dart';
+import 'package:govipservices/features/parcels/presentation/services/delivery_notification_service.dart';
 import 'package:govipservices/features/user/models/user_role.dart';
 
 
@@ -76,7 +78,10 @@ class _RequesterIdentity {
 enum _RequesterAction { login, lightAccount }
 
 class ShipPackagePage extends StatefulWidget {
-  const ShipPackagePage({super.key});
+  const ShipPackagePage({super.key, this.resumeRequestId});
+
+  /// Si non-null, reprend le suivi de la demande active à l'ouverture de la page.
+  final String? resumeRequestId;
 
   @override
   State<ShipPackagePage> createState() => _ShipPackagePageState();
@@ -152,6 +157,9 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _useCurrentLocationForPickup();
       _loadMarkerIcons();
+      if (widget.resumeRequestId != null) {
+        _resumeWatchingRequest(widget.resumeRequestId!);
+      }
     });
   }
 
@@ -423,10 +431,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     } catch (_) {
       _showMessage('Impossible de récupérer votre position actuelle.');
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isFetchingPickupLocation = false;
-      });
+      if (mounted) setState(() => _isFetchingPickupLocation = false);
     }
   }
 
@@ -495,7 +500,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
             snippet: 'En route',
           ),
           icon: _courierLiveIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          zIndex: 2,
+          zIndexInt: 2,
         ),
       );
     }
@@ -718,10 +723,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     } catch (_) {
       _showMessage('Impossible de rechercher des livreurs pour le moment.');
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isSearchingMatches = false;
-      });
+      if (mounted) setState(() => _isSearchingMatches = false);
     }
   }
 
@@ -799,10 +801,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         },
       );
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isSubmitting = false;
-      });
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -909,14 +908,16 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       if (!mounted) return;
       _startWatchingRequest(request: request, match: match);
     } catch (_) {
-      if (!mounted) return;
-      _showMessage('Impossible de notifier ce livreur pour le moment.');
+      if (mounted) {
+        _showMessage('Impossible de notifier ce livreur pour le moment.');
+      }
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isCreatingParcelRequest = false;
-        _orderingServiceId = null;
-      });
+      if (mounted) {
+        setState(() {
+          _isCreatingParcelRequest = false;
+          _orderingServiceId = null;
+        });
+      }
     }
   }
 
@@ -1156,6 +1157,30 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     );
   }
 
+  /// Reprend le suivi d'une demande active depuis son ID (ex: depuis le banner).
+  Future<void> _resumeWatchingRequest(String requestId) async {
+    final ParcelRequestDocument? doc =
+        await _parcelRequestService.fetchRequestById(requestId);
+    if (doc == null || !mounted) return;
+
+    // Reconstruit un match minimal depuis les données du document
+    final ParcelServiceMatch match = ParcelServiceMatch(
+      serviceId: doc.serviceId,
+      ownerUid: doc.providerUid,
+      title: doc.providerName,
+      contactName: doc.providerName,
+      contactPhone: '',
+      price: doc.price,
+      currency: doc.currency,
+      priceSource: 'fixed',
+      isZoneCovered: true,
+      distanceToPickupMeters: 0,
+      priorityRank: 1,
+      vehicleLabel: doc.vehicleLabel,
+    );
+    _startWatchingRequest(request: doc, match: match);
+  }
+
   void _startWatchingRequest({
     required ParcelRequestDocument request,
     required ParcelServiceMatch match,
@@ -1192,15 +1217,33 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         _activeStatus = newStatus;
         if (newCourierPos != null) _courierLivePosition = newCourierPos;
       });
+      // Mettre à jour la notification persistante
+      DeliveryNotificationService.instance.showForSender(
+        requestId: doc.id,
+        status: doc.status,
+        trackNum: doc.trackNum,
+        pickupAddress: doc.pickupAddress,
+        deliveryAddress: doc.deliveryAddress,
+        etaText: _courierEtaText,
+      );
       // Recalcule ETA + bouge la caméra si position mise à jour
       if (newCourierPos != null && !newStatus.isFinal) {
         _refreshCourierEta(courierPos: newCourierPos, status: newStatus);
         _moveCameraToShowCourier(newCourierPos);
       }
     });
+    // Notif initiale
+    DeliveryNotificationService.instance.showForSender(
+      requestId: request.id,
+      status: request.status,
+      trackNum: request.trackNum,
+      pickupAddress: request.pickupAddress,
+      deliveryAddress: request.deliveryAddress,
+    );
   }
 
   void _stopWatchingRequest() {
+    DeliveryNotificationService.instance.cancel();
     _requestSub?.cancel();
     _requestSub = null;
     setState(() {
@@ -1235,6 +1278,18 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       );
       if (!mounted) return;
       setState(() => _courierEtaText = result.durationText);
+      final String? requestId = _activeRequestId;
+      final String? trackNum = _activeTrackNum;
+      if (requestId != null && trackNum != null) {
+        DeliveryNotificationService.instance.showForSender(
+          requestId: requestId,
+          status: status.firestoreValue,
+          trackNum: trackNum,
+          pickupAddress: _pickup.address,
+          deliveryAddress: _delivery.address,
+          etaText: result.durationText,
+        );
+      }
     } catch (_) {}
   }
 
@@ -1738,12 +1793,14 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                 child: InkWell(
                   customBorder: const CircleBorder(),
                   onTap: () => Navigator.of(context).maybePop(),
-                  child: const Padding(
-                    padding: EdgeInsets.all(10),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
                     child: Icon(
-                      Icons.arrow_back_rounded,
-                      size: 22,
-                      color: Color(0xFF0F172A),
+                      Platform.isIOS
+                          ? Icons.chevron_left
+                          : Icons.arrow_back_rounded,
+                      size: Platform.isIOS ? 28 : 22,
+                      color: const Color(0xFF0F172A),
                     ),
                   ),
                 ),
@@ -2554,4 +2611,3 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     );
   }
 }
-

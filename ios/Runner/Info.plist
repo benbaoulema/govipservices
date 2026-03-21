@@ -22,6 +22,17 @@
 		<string>????</string>
 		<key>CFBundleVersion</key>
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
+		<key>CFBundleURLTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleURLName</key>
+				<string>com.govipservices.liveactivity</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>govipservices</string>
+				</array>
+			</dict>
+		</array>
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
 		<key>UILaunchStoryboardName</key>
@@ -55,6 +66,10 @@
 		<string>GVIP utilise votre appareil photo pour photographier le colis a la prise en charge et confirmer la livraison avec une preuve visuelle.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
 		<string>GVIP accede a votre galerie pour vous permettre de joindre une photo existante du colis ou d un justificatif de livraison.</string>
+		<key>NSSupportsLiveActivities</key>
+		<true/>
+		<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+		<true/>
 		<key>UIBackgroundModes</key>
 		<array>
 			<string>remote-notification</string>
