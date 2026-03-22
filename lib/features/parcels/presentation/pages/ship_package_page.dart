@@ -79,10 +79,17 @@ class _RequesterIdentity {
 enum _RequesterAction { login, lightAccount }
 
 class ShipPackagePage extends StatefulWidget {
-  const ShipPackagePage({super.key, this.resumeRequestId});
+  const ShipPackagePage({
+    super.key,
+    this.resumeRequestId,
+    this.openAddressSheet = false,
+  });
 
   /// Si non-null, reprend le suivi de la demande active à l'ouverture de la page.
   final String? resumeRequestId;
+
+  /// Si true, ouvre directement le sheet de saisie d'adresse à l'ouverture.
+  final bool openAddressSheet;
 
   @override
   State<ShipPackagePage> createState() => _ShipPackagePageState();
@@ -160,6 +167,8 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       _loadMarkerIcons();
       if (widget.resumeRequestId != null) {
         _resumeWatchingRequest(widget.resumeRequestId!);
+      } else if (widget.openAddressSheet) {
+        _openDeliverySearchSheet();
       }
     });
   }

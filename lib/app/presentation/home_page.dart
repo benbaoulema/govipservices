@@ -509,46 +509,87 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                     end: 0,
                                     curve: Curves.easeOutCubic,
                                   )
-                            : Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Text(
-                                    'Actions principales',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                  ).animate().fadeIn(
-                                        delay: 80.ms,
-                                        duration: 260.ms,
+                            : GestureDetector(
+                                onTap: () => Navigator.of(context).pushNamed(
+                                  AppRoutes.parcelsShipPackage,
+                                  arguments: true,
+                                ),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(20),
+                                    boxShadow: <BoxShadow>[
+                                      BoxShadow(
+                                        color: accent.withValues(alpha: 0.13),
+                                        blurRadius: 20,
+                                        offset: const Offset(0, 6),
                                       ),
-                                  const SizedBox(height: 8),
-                                  ...items.asMap().entries.map((entry) {
-                                    final int index = entry.key;
-                                    final HomeMenuItem item = entry.value;
-                                    return Padding(
-                                      padding: const EdgeInsets.only(bottom: 10),
-                                      child: _ActionTile(
-                                        item: item,
-                                        accent: accent,
-                                        onTap: () => _openItem(item, index),
-                                      )
-                                          .animate()
-                                          .fadeIn(
-                                            delay: Duration(milliseconds: 120 + (index * 70)),
-                                            duration: 280.ms,
-                                          )
-                                          .slideX(
-                                            begin: 0.08,
-                                            end: 0,
-                                            curve: Curves.easeOutCubic,
-                                          ),
-                                    );
-                                  }),
-                                ],
-                              ),
+                                    ],
+                                    border: Border.all(
+                                      color: accent.withValues(alpha: 0.18),
+                                    ),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                    vertical: 18,
+                                  ),
+                                  child: Row(
+                                    children: <Widget>[
+                                      Container(
+                                        width: 48,
+                                        height: 48,
+                                        decoration: BoxDecoration(
+                                          color: accent.withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(14),
+                                        ),
+                                        child: Icon(
+                                          Icons.local_shipping_outlined,
+                                          color: accent,
+                                          size: 24,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 14),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: <Widget>[
+                                            Text(
+                                              'Où livrons-nous ?',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w800,
+                                                color: accent,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 3),
+                                            Text(
+                                              'Départ • Arrivée',
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w500,
+                                                color: Colors.grey[500],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Icon(
+                                        Icons.arrow_forward_ios_rounded,
+                                        size: 16,
+                                        color: accent,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                                  .animate()
+                                  .fadeIn(delay: 80.ms, duration: 280.ms)
+                                  .slideY(
+                                    begin: 0.06,
+                                    end: 0,
+                                    curve: Curves.easeOutCubic,
+                                  ),
                       ),
                     ),
                   ],
@@ -1073,68 +1114,6 @@ class _HeroActionButton extends StatelessWidget {
             delay: 1400.ms,
             color: Colors.white.withOpacity(0.72),
           ),
-    );
-  }
-}
-
-class _ActionTile extends StatelessWidget {
-  const _ActionTile({
-    required this.item,
-    required this.accent,
-    required this.onTap,
-  });
-
-  final HomeMenuItem item;
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Ink(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            border: Border.all(color: const Color(0xFFE5E7EB)),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            children: [
-              Container(
-                height: 42,
-                width: 42,
-                decoration: BoxDecoration(
-                  color: accent.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(item.icon, color: accent),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.title,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      item.subtitle,
-                      style: const TextStyle(color: Color(0xFF6B7280)),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.arrow_forward_ios_rounded, size: 16),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
