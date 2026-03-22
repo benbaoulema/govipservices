@@ -215,7 +215,7 @@ class ParcelRequestService {
         <String, dynamic>{
           'userId': requesterUid.trim(),
           'installationId': '',
-          'domain': 'parcels',
+          'domain': 'parcel',
           'type': 'parcel_status_updated',
           'title': notif.title,
           'body': notif.body,
@@ -280,7 +280,7 @@ class ParcelRequestService {
           <String, dynamic>{
             'userId': providerUid.trim(),
             'installationId': '',
-            'domain': 'parcels',
+            'domain': 'parcel',
             'type': 'parcel_status_updated',
             'title': 'Demande annulée 🚫',
             'body': '$name a annulé la demande$ref.',

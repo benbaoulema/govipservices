@@ -139,6 +139,9 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
   final DraggableScrollableController _sheetController =
       DraggableScrollableController();
 
+  bool _autoMode = false;
+  bool _isSearchingAutoDriver = false;
+
   // Active request watch (after ordering)
   String? _activeRequestId;
   String? _activeTrackNum;
@@ -933,6 +936,166 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     }
   }
 
+  Future<void> _orderAutoMode() async {
+    if (_isSearchingAutoDriver || !_pickup.isComplete || !_delivery.isComplete) {
+      return;
+    }
+
+    // 1. Identify sender
+    final _RequesterIdentity? requester = await _ensureRequesterIdentity();
+    if (requester == null || !mounted) return;
+
+    // 2. Contact confirmation
+    final String prefillSender = _confirmedSenderContact.isNotEmpty
+        ? _confirmedSenderContact
+        : requester.contact;
+    final _ContactConfirmResult? confirmed = await _showContactConfirmSheet(
+      prefillSenderContact: prefillSender,
+      prefillReceiverName: _confirmedReceiverName,
+      prefillReceiverPhone: _confirmedReceiverPhone,
+    );
+    if (confirmed == null || !mounted) return;
+    setState(() {
+      _confirmedSenderContact = confirmed.senderContact;
+      _confirmedReceiverName = confirmed.receiverName;
+      _confirmedReceiverPhone = confirmed.receiverPhone;
+      _isSearchingAutoDriver = true;
+    });
+
+    try {
+      await _dispatchToNearestDriver(
+        requesterUid: requester.uid,
+        requesterName: requester.name,
+        senderContact: confirmed.senderContact,
+        receiverName: confirmed.receiverName,
+        receiverPhone: confirmed.receiverPhone,
+      );
+    } catch (_) {
+      if (mounted) {
+        _showMessage('Impossible de trouver un livreur pour le moment.');
+      }
+    } finally {
+      if (mounted) setState(() => _isSearchingAutoDriver = false);
+    }
+  }
+
+  /// Cherche le driver le plus proche et crée la demande.
+  /// Les contacts doivent être déjà confirmés.
+  Future<void> _dispatchToNearestDriver({
+    required String requesterUid,
+    required String requesterName,
+    required String senderContact,
+    required String receiverName,
+    required String receiverPhone,
+  }) async {
+    final ParcelServiceMatch? match =
+        await _parcelServiceMatcher.findNearestAvailableDriver(
+      pickupAddress: _pickup.address,
+      pickupLat: _pickup.lat!,
+      pickupLng: _pickup.lng!,
+      deliveryAddress: _delivery.address,
+      deliveryLat: _delivery.lat!,
+      deliveryLng: _delivery.lng!,
+    );
+
+    if (!mounted) return;
+
+    if (match == null) {
+      _showMessage(
+          'Aucun livreur disponible pour le moment. Réessayez dans quelques instants.');
+      return;
+    }
+
+    final ParcelRequestDocument request =
+        await _parcelRequestService.createRequest(
+      CreateParcelRequestInput(
+        serviceId: match.serviceId,
+        providerUid: match.ownerUid,
+        providerName: match.contactName,
+        providerPhone: match.contactPhone,
+        requesterUid: requesterUid,
+        requesterName: requesterName,
+        requesterContact: senderContact,
+        pickupAddress: _pickup.address,
+        pickupLat: _pickup.lat!,
+        pickupLng: _pickup.lng!,
+        deliveryAddress: _delivery.address,
+        deliveryLat: _delivery.lat!,
+        deliveryLng: _delivery.lng!,
+        price: match.price,
+        currency: match.currency,
+        priceSource: match.priceSource,
+        vehicleLabel: match.vehicleLabel,
+        receiverName: receiverName,
+        receiverContactPhone: receiverPhone,
+      ),
+    );
+
+    if (!mounted) return;
+    _startWatchingRequest(request: request, match: match);
+  }
+
+  /// Annule la demande en cours silencieusement et redispatche vers un autre
+  /// driver — utilisé par le timer 30 s en mode auto.
+  Future<void> _autoRetryAfterTimeout() async {
+    if (!_autoMode || !_pickup.isComplete || !_delivery.isComplete) return;
+
+    final String? requestId = _activeRequestId;
+    final String? providerUid = _activeMatch?.ownerUid;
+    final String trackNum = _activeTrackNum ?? '';
+
+    // Arrêter le watch immédiatement
+    _requestSub?.cancel();
+    _requestSub = null;
+    DeliveryNotificationService.instance.cancel();
+    setState(() {
+      _activeRequestId = null;
+      _activeTrackNum = null;
+      _activeMatch = null;
+      _activeStatus = _SenderRequestStatus.pending;
+      _courierLivePosition = null;
+      _courierEtaText = null;
+      _isSearchingAutoDriver = true;
+    });
+
+    // Annuler côté Firestore en arrière-plan (sans bloquer l'UI)
+    if (requestId != null && providerUid != null) {
+      final String requesterName =
+          FirebaseAuth.instance.currentUser?.displayName?.trim() ?? '';
+      _parcelRequestService
+          .cancelRequestAndNotifyDriver(
+            requestId: requestId,
+            providerUid: providerUid,
+            requesterName: requesterName,
+            trackNum: trackNum,
+          )
+          .catchError((_) {});
+    }
+
+    final User? user = FirebaseAuth.instance.currentUser;
+    if (user == null || !mounted) {
+      setState(() => _isSearchingAutoDriver = false);
+      return;
+    }
+
+    try {
+      final _RequesterIdentity requester =
+          await _loadAuthenticatedRequesterIdentity(user);
+      if (!mounted) return;
+      await _dispatchToNearestDriver(
+        requesterUid: requester.uid,
+        requesterName: requester.name,
+        senderContact: _confirmedSenderContact,
+        receiverName: _confirmedReceiverName,
+        receiverPhone: _confirmedReceiverPhone,
+      );
+    } catch (_) {
+      if (mounted) _showMessage('Impossible de trouver un livreur pour le moment.');
+    } finally {
+      if (mounted) setState(() => _isSearchingAutoDriver = false);
+    }
+  }
+
   Future<_ContactConfirmResult?> _showContactConfirmSheet({
     required String prefillSenderContact,
     required String prefillReceiverName,
@@ -1241,17 +1404,22 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                 .toList(growable: false);
           }
         });
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            const SnackBar(
-              behavior: SnackBarBehavior.floating,
-              backgroundColor: Color(0xFF991B1B),
-              content: Text(
-                'Ce livreur n\'est pas disponible. Choisissez-en un autre.',
+        // Mode auto : on cherche un autre driver automatiquement
+        if (_autoMode) {
+          _autoRetryAfterTimeout();
+        } else {
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              const SnackBar(
+                behavior: SnackBarBehavior.floating,
+                backgroundColor: Color(0xFF991B1B),
+                content: Text(
+                  'Ce livreur n\'est pas disponible. Choisissez-en un autre.',
+                ),
               ),
-            ),
-          );
+            );
+        }
         return;
       }
 
@@ -1928,6 +2096,103 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
             ],
           ),
         ),
+        // ── Switch "Mode auto" flottant au-dessus du sheet ──────────────
+        if (_activeRequestId == null)
+          Positioned(
+            bottom: MediaQuery.of(context).size.height * 0.40 + 12,
+            left: 20,
+            right: 20,
+            child: Center(
+              child: GestureDetector(
+                onTap: () => setState(() => _autoMode = !_autoMode),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 260),
+                  curve: Curves.easeOutCubic,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: _autoMode
+                        ? const Color(0xFF0F766E)
+                        : Colors.white.withValues(alpha: 0.96),
+                    borderRadius: BorderRadius.circular(99),
+                    boxShadow: <BoxShadow>[
+                      BoxShadow(
+                        color: _autoMode
+                            ? const Color(0xFF0F766E).withValues(alpha: 0.35)
+                            : Colors.black.withValues(alpha: 0.14),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        child: Icon(
+                          _autoMode
+                              ? Icons.bolt_rounded
+                              : Icons.bolt_outlined,
+                          key: ValueKey<bool>(_autoMode),
+                          size: 18,
+                          color: _autoMode
+                              ? Colors.white
+                              : const Color(0xFF0F766E),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Mode auto',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: _autoMode
+                              ? Colors.white
+                              : const Color(0xFF0F172A),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 260),
+                        width: 36,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(99),
+                          color: _autoMode
+                              ? Colors.white.withValues(alpha: 0.3)
+                              : const Color(0xFFE2E8F0),
+                        ),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: <Widget>[
+                            AnimatedAlign(
+                              duration: const Duration(milliseconds: 220),
+                              curve: Curves.easeOutCubic,
+                              alignment: _autoMode
+                                  ? Alignment.centerRight
+                                  : Alignment.centerLeft,
+                              child: Container(
+                                width: 16,
+                                height: 16,
+                                margin: const EdgeInsets.symmetric(horizontal: 2),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: _autoMode
+                                      ? Colors.white
+                                      : const Color(0xFF94A3B8),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
         DraggableScrollableSheet(
           controller: _sheetController,
           initialChildSize: 0.40,
@@ -1965,8 +2230,18 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                     ),
                   ),
 
+                  // ── Mode auto panel ───────────────────────────────────
+                  if (_autoMode && _activeRequestId == null)
+                    _AutoModePanel(
+                      pickup: _pickup,
+                      delivery: _delivery,
+                      durationText: _routeDurationText,
+                      isLoading: _isSearchingAutoDriver,
+                      onOrder: _orderAutoMode,
+                    ),
+
                   // ── Livreurs (sticky) — masqué pendant le suivi ────────
-                  if (_activeRequestId == null && (_isSearchingMatches || _matches.isNotEmpty || _hasSearchedMatches)) ...<Widget>[
+                  if (_activeRequestId == null && !_autoMode && (_isSearchingMatches || _matches.isNotEmpty || _hasSearchedMatches)) ...<Widget>[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
                       child: Row(
@@ -2116,6 +2391,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                       etaText: _courierEtaText ?? _routeDurationText,
                       onClose: _stopWatchingRequest,
                       onCancel: _cancelRequest,
+                      onTimeout: _autoMode ? _autoRetryAfterTimeout : null,
                       scrollController: scrollController,
                     )
                   else

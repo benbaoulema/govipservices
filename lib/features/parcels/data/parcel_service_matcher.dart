@@ -95,6 +95,96 @@ class ParcelServiceMatcher {
 
   final FirebaseFirestore _firestore;
 
+  /// Mode auto : retourne le livreur disponible le plus proche du pickup.
+  /// Pas de scoring de zone — uniquement la distance GPS.
+  Future<ParcelServiceMatch?> findNearestAvailableDriver({
+    required String pickupAddress,
+    required double pickupLat,
+    required double pickupLng,
+    required String deliveryAddress,
+    required double deliveryLat,
+    required double deliveryLng,
+  }) async {
+    // 1. Cherche d'abord dans la bande lat proche
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs =
+        await _queryByLatBand(pickupLat: pickupLat, delta: _nearbyLatDelta);
+
+    // 2. Si trop peu de résultats, élargit à tous les services
+    if (docs.length < 5) {
+      final List<QueryDocumentSnapshot<Map<String, dynamic>>> global =
+          await _queryAllSearchable(limit: _globalSearchLimit);
+      final Set<String> ids = docs.map((d) => d.id).toSet();
+      docs = <QueryDocumentSnapshot<Map<String, dynamic>>>[
+        ...docs,
+        ...global.where((d) => !ids.contains(d.id)),
+      ];
+    }
+
+    // 3. Mappe en ParcelServiceMatch (prix fallback, pas de zone scoring)
+    final List<ParcelServiceMatch> candidates = docs
+        .map((QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+          final Map<String, dynamic> data = doc.data();
+          final Map<String, dynamic> search =
+              data['search'] is Map<String, dynamic>
+                  ? Map<String, dynamic>.from(
+                      data['search'] as Map<String, dynamic>)
+                  : <String, dynamic>{};
+          final double? ownerLat = (search['ownerLat'] as num?)?.toDouble();
+          final double? ownerLng = (search['ownerLng'] as num?)?.toDouble();
+          if (ownerLat == null || ownerLng == null) return null;
+
+          final double distM = Geolocator.distanceBetween(
+              ownerLat, ownerLng, pickupLat, pickupLng);
+          final _PlatformPrice price = _estimatePlatformPrice(
+            pickupLat: pickupLat,
+            pickupLng: pickupLng,
+            deliveryLat: deliveryLat,
+            deliveryLng: deliveryLng,
+          );
+          final Map<String, dynamic> typeVehicule =
+              data['typeVehicule'] is Map<String, dynamic>
+                  ? Map<String, dynamic>.from(
+                      data['typeVehicule'] as Map<String, dynamic>)
+                  : <String, dynamic>{};
+
+          return ParcelServiceMatch(
+            serviceId: doc.id,
+            ownerUid: '${data['ownerUid'] ?? ''}'.trim(),
+            title: '${data['title'] ?? data['name'] ?? 'Livreur'}'.trim(),
+            contactName:
+                '${data['contactName'] ?? data['name'] ?? 'Livreur'}'.trim(),
+            contactPhone: '${data['contactPhone'] ?? ''}'.trim(),
+            price: price.price,
+            currency: price.currency,
+            priceSource: 'Tarif GoVIP',
+            isZoneCovered: false,
+            distanceToPickupMeters: distM,
+            priorityRank: 1,
+            vehicleLabel:
+                '${typeVehicule['name'] ?? ''}'.trim(),
+          );
+        })
+        .whereType<ParcelServiceMatch>()
+        .toList(growable: true);
+
+    if (candidates.isEmpty) return null;
+
+    // 4. Filtre les livreurs occupés
+    final List<String> uids =
+        candidates.map((ParcelServiceMatch m) => m.ownerUid).toList();
+    final Set<String> busyUids = await _fetchBusyProviderUids(uids);
+    final List<ParcelServiceMatch> available = candidates
+        .where((ParcelServiceMatch m) => !busyUids.contains(m.ownerUid))
+        .toList(growable: false);
+
+    if (available.isEmpty) return null;
+
+    // 5. Retourne le plus proche
+    available.sort((ParcelServiceMatch a, ParcelServiceMatch b) =>
+        a.distanceToPickupMeters.compareTo(b.distanceToPickupMeters));
+    return available.first;
+  }
+
   Future<List<ParcelServiceMatch>> findMatches({
     required String pickupAddress,
     required double pickupLat,

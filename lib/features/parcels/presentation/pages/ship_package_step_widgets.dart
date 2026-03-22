@@ -148,6 +148,7 @@ class _WaitingInlineContent extends StatefulWidget {
     required this.onClose,
     required this.scrollController,
     this.onCancel,
+    this.onTimeout,
     this.etaText,
   });
 
@@ -156,6 +157,7 @@ class _WaitingInlineContent extends StatefulWidget {
   final _SenderRequestStatus status;
   final VoidCallback onClose;
   final VoidCallback? onCancel;
+  final VoidCallback? onTimeout;
   final ScrollController scrollController;
   final String? etaText;
 
@@ -200,6 +202,16 @@ class _WaitingInlineContentState extends State<_WaitingInlineContent>
 
   @override
   Widget build(BuildContext context) {
+    // Radar animé quand le driver n'a pas encore répondu
+    if (widget.status == _SenderRequestStatus.pending) {
+      return _RadarPendingView(
+        match: widget.match,
+        scrollController: widget.scrollController,
+        onCancel: widget.onCancel,
+        onTimeout: widget.onTimeout,
+      );
+    }
+
     final double bottomPad = MediaQuery.of(context).padding.bottom + 24;
     return Expanded(
       child: ListView(
@@ -1038,6 +1050,521 @@ class _BottomActionBar extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Radar pending view ────────────────────────────────────────────────────────
+
+class _RadarPendingView extends StatefulWidget {
+  const _RadarPendingView({
+    required this.match,
+    required this.scrollController,
+    this.onCancel,
+    this.onTimeout,
+  });
+
+  static const int _kTimeoutSeconds = 30;
+
+  final ParcelServiceMatch match;
+  final ScrollController scrollController;
+  final VoidCallback? onCancel;
+  final VoidCallback? onTimeout;
+
+  @override
+  State<_RadarPendingView> createState() => _RadarPendingViewState();
+}
+
+class _RadarPendingViewState extends State<_RadarPendingView>
+    with SingleTickerProviderStateMixin {
+  static const Color _teal = Color(0xFF0F766E);
+
+  late final AnimationController _ctrl;
+  late int _countdown;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _countdown = _RadarPendingView._kTimeoutSeconds;
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    )..repeat();
+    if (widget.onTimeout != null) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (!mounted) { t.cancel(); return; }
+        setState(() => _countdown--);
+        if (_countdown <= 0) {
+          t.cancel();
+          widget.onTimeout!();
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Widget _buildRing(double phase) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) {
+        final double t = (_ctrl.value + phase) % 1.0;
+        final double scale = 0.35 + t * 1.65;
+        final double opacity = (0.55 * (1.0 - t)).clamp(0.0, 1.0);
+        return Center(
+          child: Transform.scale(
+            scale: scale,
+            child: Opacity(
+              opacity: opacity,
+              child: Container(
+                width: 160,
+                height: 160,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _teal, width: 1.8),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double bottomPad = MediaQuery.of(context).padding.bottom + 24;
+    final String name = widget.match.contactName;
+    final String initial =
+        name.isNotEmpty ? name[0].toUpperCase() : '?';
+
+    return Expanded(
+      child: ListView(
+        controller: widget.scrollController,
+        padding: EdgeInsets.fromLTRB(20, 32, 20, bottomPad),
+        children: <Widget>[
+          // ── Radar ─────────────────────────────────────────────────────────
+          SizedBox(
+            height: 200,
+            child: Stack(
+              children: <Widget>[
+                _buildRing(0.0),
+                _buildRing(0.33),
+                _buildRing(0.67),
+                // Avatar central + arc countdown
+                Center(
+                  child: AnimatedBuilder(
+                    animation: _ctrl,
+                    builder: (_, child) {
+                      final double half = _ctrl.value < 0.5
+                          ? _ctrl.value * 2
+                          : (1.0 - _ctrl.value) * 2;
+                      final double pulse = 1.0 + 0.06 * half;
+                      return Transform.scale(scale: pulse, child: child);
+                    },
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: <Widget>[
+                        // Arc de countdown (visible seulement si onTimeout actif)
+                        if (widget.onTimeout != null)
+                          SizedBox(
+                            width: 92,
+                            height: 92,
+                            child: CircularProgressIndicator(
+                              value: _countdown / _RadarPendingView._kTimeoutSeconds,
+                              strokeWidth: 2.5,
+                              backgroundColor:
+                                  Colors.white.withValues(alpha: 0.15),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ),
+                        Container(
+                          width: 76,
+                          height: 76,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _teal,
+                            boxShadow: <BoxShadow>[
+                              BoxShadow(
+                                color: _teal.withValues(alpha: 0.45),
+                                blurRadius: 24,
+                                spreadRadius: 4,
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: Text(
+                              initial,
+                              style: const TextStyle(
+                                fontSize: 30,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 28),
+
+          // ── Texte ─────────────────────────────────────────────────────────
+          const Text(
+            'En attente de',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              color: Color(0xFF94A3B8),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            name,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF0F172A),
+              letterSpacing: -0.4,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Votre demande a été envoyée.\nLe coursier va répondre dans quelques instants.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.5,
+              color: Color(0xFF64748B),
+            ),
+          ),
+
+          const SizedBox(height: 36),
+
+          // ── Annuler ───────────────────────────────────────────────────────
+          if (widget.onCancel != null)
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton(
+                onPressed: widget.onCancel,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFDC2626),
+                  side:
+                      const BorderSide(color: Color(0xFFDC2626), width: 1.5),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text(
+                  'Annuler la demande',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Mode auto panel ───────────────────────────────────────────────────────────
+
+class _AutoModePanel extends StatelessWidget {
+  const _AutoModePanel({
+    required this.pickup,
+    required this.delivery,
+    required this.onOrder,
+    this.durationText,
+    this.isLoading = false,
+  });
+
+  final _AddressPoint pickup;
+  final _AddressPoint delivery;
+  final String? durationText;
+  final VoidCallback onOrder;
+  final bool isLoading;
+
+  static const Color _teal = Color(0xFF0F766E);
+
+  bool get _hasRoute =>
+      pickup.lat != null &&
+      pickup.lng != null &&
+      delivery.lat != null &&
+      delivery.lng != null;
+
+  double get _estimatedPrice {
+    if (!_hasRoute) return 0;
+    final double distM = Geolocator.distanceBetween(
+      pickup.lat!,
+      pickup.lng!,
+      delivery.lat!,
+      delivery.lng!,
+    );
+    final double raw = 1000 + (distM / 1000 * 275);
+    return ((raw / 100).ceil() * 100).toDouble();
+  }
+
+  double get _distanceKm {
+    if (!_hasRoute) return 0;
+    return Geolocator.distanceBetween(
+          pickup.lat!,
+          pickup.lng!,
+          delivery.lat!,
+          delivery.lng!,
+        ) /
+        1000;
+  }
+
+  String _formatPrice(double v) =>
+      v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(0);
+
+  @override
+  Widget build(BuildContext context) {
+    final bool ready = _hasRoute;
+    final double price = _estimatedPrice;
+    final double km = _distanceKm;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          gradient: ready
+              ? const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: <Color>[Color(0xFF0F766E), Color(0xFF0D9488)],
+                )
+              : null,
+          color: ready ? null : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: ready
+                ? Colors.transparent
+                : const Color(0xFFE2E8F0),
+          ),
+          boxShadow: ready
+              ? <BoxShadow>[
+                  BoxShadow(
+                    color: _teal.withValues(alpha: 0.25),
+                    blurRadius: 20,
+                    offset: const Offset(0, 6),
+                  ),
+                ]
+              : null,
+        ),
+        padding: const EdgeInsets.all(18),
+        child: ready
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  // Ligne départ → arrivée
+                  Row(
+                    children: <Widget>[
+                      const Icon(Icons.my_location_rounded,
+                          size: 14, color: Colors.white70),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          pickup.address,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6, top: 2, bottom: 2),
+                    child: Container(
+                      width: 1,
+                      height: 10,
+                      color: Colors.white30,
+                    ),
+                  ),
+                  Row(
+                    children: <Widget>[
+                      const Icon(Icons.flag_rounded,
+                          size: 14, color: Colors.white70),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          delivery.address,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  // Prix + distance
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: <Widget>[
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            const Text(
+                              'Tarif estimé',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.white70,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${_formatPrice(price)} XOF',
+                              style: const TextStyle(
+                                fontSize: 26,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Pills distance + durée
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: <Widget>[
+                          _InfoPill(
+                            icon: Icons.straighten_rounded,
+                            label: '${km.toStringAsFixed(1)} km',
+                          ),
+                          if (durationText != null) ...<Widget>[
+                            const SizedBox(height: 4),
+                            _InfoPill(
+                              icon: Icons.schedule_rounded,
+                              label: durationText!,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Bouton Commander
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: isLoading ? null : onOrder,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: _teal,
+                        disabledBackgroundColor:
+                            Colors.white.withValues(alpha: 0.7),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: isLoading
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Color(0xFF0F766E)),
+                              ),
+                            )
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: <Widget>[
+                                Icon(Icons.bolt_rounded, size: 20),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Commander',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ],
+              )
+            : Row(
+                children: <Widget>[
+                  const Icon(Icons.info_outline_rounded,
+                      size: 18, color: Color(0xFF94A3B8)),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Renseignez départ et arrivée pour voir le tarif',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[500],
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  const _InfoPill({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 12, color: Colors.white),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            ),
+          ),
+        ],
       ),
     );
   }
