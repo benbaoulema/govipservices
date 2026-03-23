@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:govipservices/app/presentation/widgets/home_availability_panel.dart';
+import 'package:govipservices/features/parcels/data/vehicle_type_repository.dart';
+import 'package:govipservices/features/parcels/domain/models/vehicle_type.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/notifications/presentation/widgets/notifications_app_bar_button.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
@@ -40,12 +42,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   static const Color _parcelAccent = Color(0xFF0F766E);
   final TravelRepository _travelRepository = TravelRepository();
   final UserAvailabilityService _availabilityService = UserAvailabilityService();
+  final VehicleTypeRepository _vehicleTypeRepo = VehicleTypeRepository();
   HomeMode _activeMode = HomeMode.travel;
   int _travelIndex = 0;
   int _parcelsIndex = 0;
   late Future<List<TripSearchResult>> _featuredProTripsFuture;
   UserAvailabilitySnapshot _availability = UserAvailabilitySnapshot.offline();
   bool _isUpdatingAvailability = false;
+  List<VehicleType> _vehicleTypes = const <VehicleType>[];
+  VehicleType? _selectedVehicleType;
 
   static const List<HomeMenuItem> _travelItems = [
     HomeMenuItem(
@@ -131,6 +136,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _featuredProTripsFuture = _loadFeaturedProTrips();
     _loadAvailability();
+    _loadVehicleTypes();
+  }
+
+  Future<void> _loadVehicleTypes() async {
+    try {
+      final List<VehicleType> types =
+          await _vehicleTypeRepo.fetchActiveVehicleTypes();
+      if (!mounted || types.isEmpty) return;
+      setState(() {
+        _vehicleTypes = types;
+        _selectedVehicleType ??= types.first;
+      });
+    } catch (_) {
+      // Non-bloquant — l'écran fonctionne sans filtre véhicule
+    }
   }
 
   @override
@@ -509,79 +529,102 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                     end: 0,
                                     curve: Curves.easeOutCubic,
                                   )
-                            : GestureDetector(
-                                onTap: () => Navigator.of(context).pushNamed(
-                                  AppRoutes.parcelsShipPackage,
-                                  arguments: true,
-                                ),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(20),
-                                    boxShadow: <BoxShadow>[
-                                      BoxShadow(
-                                        color: accent.withValues(alpha: 0.13),
-                                        blurRadius: 20,
-                                        offset: const Offset(0, 6),
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  if (_vehicleTypes.isNotEmpty) ...<Widget>[
+                                    _VehicleChipRow(
+                                      types: _vehicleTypes,
+                                      selected: _selectedVehicleType,
+                                      accent: accent,
+                                      onSelect: (v) => setState(
+                                        () => _selectedVehicleType = v,
                                       ),
-                                    ],
-                                    border: Border.all(
-                                      color: accent.withValues(alpha: 0.18),
+                                    ),
+                                    const SizedBox(height: 12),
+                                  ],
+                                  GestureDetector(
+                                    onTap: () => Navigator.of(context).pushNamed(
+                                      AppRoutes.parcelsShipPackage,
+                                      arguments: <String, dynamic>{
+                                        'openAddressSheet': true,
+                                        'vehicleLabel':
+                                            _selectedVehicleType?.name,
+                                      },
+                                    ),
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(20),
+                                        boxShadow: <BoxShadow>[
+                                          BoxShadow(
+                                            color:
+                                                accent.withValues(alpha: 0.13),
+                                            blurRadius: 20,
+                                            offset: const Offset(0, 6),
+                                          ),
+                                        ],
+                                        border: Border.all(
+                                          color: accent.withValues(alpha: 0.18),
+                                        ),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 18,
+                                        vertical: 18,
+                                      ),
+                                      child: Row(
+                                        children: <Widget>[
+                                          Container(
+                                            width: 48,
+                                            height: 48,
+                                            decoration: BoxDecoration(
+                                              color:
+                                                  accent.withValues(alpha: 0.1),
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                            ),
+                                            child: Icon(
+                                              Icons.local_shipping_outlined,
+                                              color: accent,
+                                              size: 24,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 14),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: <Widget>[
+                                                Text(
+                                                  'Où livrons-nous ?',
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: accent,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 3),
+                                                Text(
+                                                  'Départ • Arrivée',
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w500,
+                                                    color: Colors.grey[500],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Icon(
+                                            Icons.arrow_forward_ios_rounded,
+                                            size: 16,
+                                            color: accent,
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 18,
-                                    vertical: 18,
-                                  ),
-                                  child: Row(
-                                    children: <Widget>[
-                                      Container(
-                                        width: 48,
-                                        height: 48,
-                                        decoration: BoxDecoration(
-                                          color: accent.withValues(alpha: 0.1),
-                                          borderRadius: BorderRadius.circular(14),
-                                        ),
-                                        child: Icon(
-                                          Icons.local_shipping_outlined,
-                                          color: accent,
-                                          size: 24,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 14),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: <Widget>[
-                                            Text(
-                                              'Où livrons-nous ?',
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w800,
-                                                color: accent,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 3),
-                                            Text(
-                                              'Départ • Arrivée',
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w500,
-                                                color: Colors.grey[500],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Icon(
-                                        Icons.arrow_forward_ios_rounded,
-                                        size: 16,
-                                        color: accent,
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                                ],
                               )
                                   .animate()
                                   .fadeIn(delay: 80.ms, duration: 280.ms)
@@ -1769,6 +1812,101 @@ class _FeaturedTripsEmpty extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Sélecteur de type de véhicule ────────────────────────────────────────────
+
+class _VehicleChipRow extends StatelessWidget {
+  const _VehicleChipRow({
+    required this.types,
+    required this.selected,
+    required this.accent,
+    required this.onSelect,
+  });
+
+  final List<VehicleType> types;
+  final VehicleType? selected;
+  final Color accent;
+  final ValueChanged<VehicleType> onSelect;
+
+  IconData _icon(String name) {
+    final String n = name.toLowerCase();
+    if (n.contains('moto')) return Icons.two_wheeler_rounded;
+    if (n.contains('tricycle') || n.contains('rickshaw')) {
+      return Icons.electric_rickshaw_rounded;
+    }
+    if (n.contains('cargo') || n.contains('camion') || n.contains('van')) {
+      return Icons.local_shipping_rounded;
+    }
+    if (n.contains('car') || n.contains('voiture')) {
+      return Icons.directions_car_rounded;
+    }
+    return Icons.local_taxi_rounded;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 40,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.zero,
+        itemCount: types.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final VehicleType type = types[index];
+          final bool isSelected = selected?.id == type.id;
+          return GestureDetector(
+            onTap: () => onSelect(type),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: isSelected ? accent : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isSelected
+                      ? accent
+                      : accent.withValues(alpha: 0.25),
+                  width: 1.5,
+                ),
+                boxShadow: isSelected
+                    ? <BoxShadow>[
+                        BoxShadow(
+                          color: accent.withValues(alpha: 0.25),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(
+                    _icon(type.name),
+                    size: 16,
+                    color: isSelected ? Colors.white : accent,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    type.name,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? Colors.white : accent,
+                      letterSpacing: -0.1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

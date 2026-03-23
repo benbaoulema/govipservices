@@ -53,13 +53,18 @@ class AppRouter {
           settings: settings,
         );
       case AppRoutes.parcelsShipPackage:
-        final bool openSheet = settings.arguments == true;
+        final Object? args = settings.arguments;
+        final bool openSheet = args == true ||
+            (args is Map && args['openAddressSheet'] == true);
         final String? resumeId =
-            settings.arguments is String ? settings.arguments as String : null;
+            args is String ? args : null;
+        final String? vehicleLabel =
+            args is Map ? args['vehicleLabel'] as String? : null;
         return MaterialPageRoute<void>(
           builder: (_) => ShipPackagePage(
             resumeRequestId: resumeId,
             openAddressSheet: openSheet,
+            vehicleLabel: vehicleLabel,
           ),
           settings: settings,
         );

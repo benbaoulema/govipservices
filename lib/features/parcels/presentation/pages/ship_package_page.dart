@@ -83,6 +83,7 @@ class ShipPackagePage extends StatefulWidget {
     super.key,
     this.resumeRequestId,
     this.openAddressSheet = false,
+    this.vehicleLabel,
   });
 
   /// Si non-null, reprend le suivi de la demande active à l'ouverture de la page.
@@ -90,6 +91,9 @@ class ShipPackagePage extends StatefulWidget {
 
   /// Si true, ouvre directement le sheet de saisie d'adresse à l'ouverture.
   final bool openAddressSheet;
+
+  /// Si non-null, filtre les drivers affichés par type de véhicule.
+  final String? vehicleLabel;
 
   @override
   State<ShipPackagePage> createState() => _ShipPackagePageState();
@@ -123,6 +127,14 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
   List<ParcelServiceMatch> _matches = const <ParcelServiceMatch>[];
   ParcelServiceMatch? _selectedMatch;
   bool _hasSearchedMatches = false;
+
+  List<ParcelServiceMatch> get _displayedMatches {
+    final String? label = widget.vehicleLabel?.trim().toLowerCase();
+    if (label == null || label.isEmpty) return _matches;
+    return _matches
+        .where((m) => m.vehicleLabel.toLowerCase().contains(label))
+        .toList(growable: false);
+  }
   bool _isFetchingPickupLocation = false;
   bool _isSearchingMatches = false;
   bool _isCreatingParcelRequest = false;
@@ -996,6 +1008,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       deliveryAddress: _delivery.address,
       deliveryLat: _delivery.lat!,
       deliveryLng: _delivery.lng!,
+      vehicleLabel: widget.vehicleLabel,
     );
 
     if (!mounted) return;
@@ -2252,7 +2265,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                             decoration: BoxDecoration(
                               color: _isSearchingMatches
                                   ? const Color(0xFFF59E0B)
-                                  : _matches.isNotEmpty
+                                  : _displayedMatches.isNotEmpty
                                       ? const Color(0xFF10B981)
                                       : const Color(0xFF94A3B8),
                               shape: BoxShape.circle,
@@ -2263,7 +2276,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                             child: Text(
                               _isSearchingMatches
                                   ? 'Recherche en cours…'
-                                  : _matches.isNotEmpty
+                                  : _displayedMatches.isNotEmpty
                                       ? 'Livreurs disponibles'
                                       : 'Aucune correspondance',
                               overflow: TextOverflow.ellipsis,
@@ -2322,7 +2335,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                                 ),
                               ),
                             )
-                          : _matches.isEmpty
+                          : _displayedMatches.isEmpty
                               ? Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 18,
@@ -2354,13 +2367,13 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                                   ),
                                   scrollDirection: Axis.horizontal,
                                   physics: const BouncingScrollPhysics(),
-                                  itemCount: _matches.length,
+                                  itemCount: _displayedMatches.length,
                                   separatorBuilder:
                                       (_, __) => const SizedBox(width: 12),
                                   itemBuilder:
                                       (BuildContext context, int index) {
                                         final ParcelServiceMatch match =
-                                            _matches[index];
+                                            _displayedMatches[index];
                                         return SizedBox(
                                           width: 268,
                                           child: _ParcelMatchCard(
@@ -2774,7 +2787,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                                         ),
                                         const SizedBox(width: 10),
                                         Text(
-                                          _matches.isNotEmpty &&
+                                          _displayedMatches.isNotEmpty &&
                                                   _selectedMatch != null
                                               ? 'Continuer'
                                               : 'Voir les livreurs',
@@ -2825,7 +2838,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                 child: CircularProgressIndicator(),
               ),
             )
-          else if (_matches.isEmpty)
+          else if (_displayedMatches.isEmpty)
             DecoratedBox(
               decoration: BoxDecoration(
                 color: const Color(0xFFF8FAFC),
@@ -2842,7 +2855,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
             )
           else
             Column(
-              children: _matches
+              children: _displayedMatches
                   .map(
                     (ParcelServiceMatch match) => Padding(
                       padding: const EdgeInsets.only(bottom: 12),

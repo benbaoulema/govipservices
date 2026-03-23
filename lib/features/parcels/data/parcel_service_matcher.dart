@@ -104,6 +104,7 @@ class ParcelServiceMatcher {
     required String deliveryAddress,
     required double deliveryLat,
     required double deliveryLng,
+    String? vehicleLabel,
   }) async {
     // 1. Cherche d'abord dans la bande lat proche
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs =
@@ -169,11 +170,22 @@ class ParcelServiceMatcher {
 
     if (candidates.isEmpty) return null;
 
-    // 4. Filtre les livreurs occupés
+    // 4. Filtre par type de véhicule si demandé
+    List<ParcelServiceMatch> filtered = candidates;
+    if (vehicleLabel != null && vehicleLabel.trim().isNotEmpty) {
+      final String lv = vehicleLabel.trim().toLowerCase();
+      filtered = candidates
+          .where((ParcelServiceMatch m) =>
+              m.vehicleLabel.toLowerCase().contains(lv))
+          .toList(growable: true);
+      if (filtered.isEmpty) return null;
+    }
+
+    // 5. Filtre les livreurs occupés
     final List<String> uids =
-        candidates.map((ParcelServiceMatch m) => m.ownerUid).toList();
+        filtered.map((ParcelServiceMatch m) => m.ownerUid).toList();
     final Set<String> busyUids = await _fetchBusyProviderUids(uids);
-    final List<ParcelServiceMatch> available = candidates
+    final List<ParcelServiceMatch> available = filtered
         .where((ParcelServiceMatch m) => !busyUids.contains(m.ownerUid))
         .toList(growable: false);
 
