@@ -1835,67 +1835,125 @@ class _VehicleChipRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 44,
+      height: 90,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: EdgeInsets.zero,
+        padding: const EdgeInsets.only(bottom: 4),
         itemCount: types.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
         itemBuilder: (context, index) {
           final VehicleType type = types[index];
           final bool isSelected = selected?.id == type.id;
           final String? imageUrl = type.imageUrl;
+
           return GestureDetector(
             onTap: () => onSelect(type),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: const Duration(milliseconds: 220),
               curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              width: 112,
+              height: 82,
               decoration: BoxDecoration(
-                color: isSelected ? accent : Colors.white,
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: isSelected ? accent : accent.withValues(alpha: 0.25),
-                  width: 1.5,
+                  color: isSelected ? accent : Colors.transparent,
+                  width: 2.5,
                 ),
-                boxShadow: isSelected
-                    ? <BoxShadow>[
-                        BoxShadow(
-                          color: accent.withValues(alpha: 0.28),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3),
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  if (imageUrl != null && imageUrl.isNotEmpty)
-                    Image.network(
-                      imageUrl,
-                      width: 24,
-                      height: 24,
-                      fit: BoxFit.contain,
-                      color: isSelected ? Colors.white : null,
-                      colorBlendMode:
-                          isSelected ? BlendMode.srcIn : null,
-                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                    )
-                  else
-                    const SizedBox.shrink(),
-                  if (imageUrl != null && imageUrl.isNotEmpty)
-                    const SizedBox(width: 7),
-                  Text(
-                    type.name,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: isSelected ? Colors.white : accent,
-                      letterSpacing: -0.1,
-                    ),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: isSelected
+                        ? accent.withValues(alpha: 0.38)
+                        : Colors.black.withValues(alpha: 0.10),
+                    blurRadius: isSelected ? 16 : 6,
+                    offset: const Offset(0, 3),
                   ),
                 ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(13),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: <Widget>[
+                    // ── Image de fond ───────────────────────────────────
+                    if (imageUrl != null && imageUrl.isNotEmpty)
+                      Image.network(
+                        imageUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            ColoredBox(color: accent.withValues(alpha: 0.12)),
+                      )
+                    else
+                      ColoredBox(color: accent.withValues(alpha: 0.12)),
+
+                    // ── Gradient sombre bas ──────────────────────────────
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: <double>[0.3, 1.0],
+                          colors: <Color>[
+                            Colors.transparent,
+                            Color(0xCC000000),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // ── Overlay teal si sélectionné ──────────────────────
+                    if (isSelected)
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.18),
+                        ),
+                      ),
+
+                    // ── Nom en bas ───────────────────────────────────────
+                    Positioned(
+                      left: 8,
+                      right: 8,
+                      bottom: 7,
+                      child: Text(
+                        type.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.1,
+                          shadows: <Shadow>[
+                            Shadow(color: Colors.black54, blurRadius: 6),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // ── Badge ✓ en haut à droite si sélectionné ─────────
+                    if (isSelected)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: accent,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.check_rounded,
+                            color: Colors.white,
+                            size: 12,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           );
