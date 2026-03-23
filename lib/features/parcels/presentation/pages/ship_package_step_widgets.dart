@@ -1321,6 +1321,8 @@ class _AutoModePanel extends StatelessWidget {
     required this.delivery,
     required this.onOrder,
     this.durationText,
+    this.proposedPrice,
+    this.onPriceChanged,
     this.isLoading = false,
   });
 
@@ -1328,6 +1330,8 @@ class _AutoModePanel extends StatelessWidget {
   final _AddressPoint delivery;
   final String? durationText;
   final VoidCallback onOrder;
+  final double? proposedPrice;
+  final ValueChanged<double>? onPriceChanged;
   final bool isLoading;
 
   static const Color _teal = Color(0xFF0F766E);
@@ -1456,54 +1460,30 @@ class _AutoModePanel extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 14),
-                  // Prix + distance
+                  // Pills distance + durée
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: <Widget>[
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            const Text(
-                              'Tarif estime',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Color(0xFF64748B),
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.4,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${_formatPrice(price)} XOF',
-                              style: const TextStyle(
-                                fontSize: 26,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFF0F172A),
-                                letterSpacing: -0.5,
-                              ),
-                            ),
-                          ],
+                      _InfoPill(
+                        icon: Icons.straighten_rounded,
+                        label: '${km.toStringAsFixed(1)} km',
+                      ),
+                      if (durationText != null) ...<Widget>[
+                        const SizedBox(width: 6),
+                        _InfoPill(
+                          icon: Icons.schedule_rounded,
+                          label: durationText!,
                         ),
-                      ),
-                      // Pills distance + durée
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: <Widget>[
-                          _InfoPill(
-                            icon: Icons.straighten_rounded,
-                            label: '${km.toStringAsFixed(1)} km',
-                          ),
-                          if (durationText != null) ...<Widget>[
-                            const SizedBox(height: 4),
-                            _InfoPill(
-                              icon: Icons.schedule_rounded,
-                              label: durationText!,
-                            ),
-                          ],
-                        ],
-                      ),
+                      ],
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Prix proposé (ajustable)
+                  _PriceAdjusterRow(
+                    initialPrice: proposedPrice ?? price,
+                    currency: 'XOF',
+                    onChanged: onPriceChanged ?? (_) {},
+                    showLabel: false,
                   ),
                   const SizedBox(height: 16),
                   // Bouton Commander
@@ -1619,6 +1599,226 @@ class _InfoPill extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Ajusteur de prix ──────────────────────────────────────────────────────────
+
+class _PriceAdjusterRow extends StatefulWidget {
+  const _PriceAdjusterRow({
+    required this.initialPrice,
+    required this.currency,
+    required this.onChanged,
+    this.step = 500.0,
+    this.minPrice = 500.0,
+    this.showLabel = true,
+  });
+
+  final double initialPrice;
+  final String currency;
+  final ValueChanged<double> onChanged;
+  final double step;
+  final double minPrice;
+  final bool showLabel;
+
+  @override
+  State<_PriceAdjusterRow> createState() => _PriceAdjusterRowState();
+}
+
+class _PriceAdjusterRowState extends State<_PriceAdjusterRow> {
+  static const Color _teal = Color(0xFF0F766E);
+
+  late double _price;
+  late final TextEditingController _ctrl;
+  final FocusNode _focusNode = FocusNode();
+  bool _editing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _price = widget.initialPrice;
+    _ctrl = TextEditingController(text: _price.toInt().toString());
+    _focusNode.addListener(_onFocusChanged);
+  }
+
+  @override
+  void didUpdateWidget(_PriceAdjusterRow old) {
+    super.didUpdateWidget(old);
+    // Synchronise si la route change et que l'utilisateur n'est pas en train de saisir
+    if (old.initialPrice != widget.initialPrice && !_focusNode.hasFocus) {
+      _setPrice(widget.initialPrice, notify: false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_onFocusChanged);
+    _focusNode.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _onFocusChanged() {
+    if (!_focusNode.hasFocus) _commitEdit();
+    setState(() => _editing = _focusNode.hasFocus);
+  }
+
+  void _setPrice(double v, {bool notify = true}) {
+    final double clamped = v.clamp(widget.minPrice, 9999999);
+    final double rounded = ((clamped / 100).round() * 100).toDouble();
+    setState(() {
+      _price = rounded;
+      if (!_focusNode.hasFocus) _ctrl.text = rounded.toInt().toString();
+    });
+    if (notify) widget.onChanged(rounded);
+  }
+
+  void _adjust(double delta) => _setPrice(_price + delta);
+
+  void _commitEdit() {
+    final String raw = _ctrl.text.replaceAll(RegExp(r'[^\d]'), '');
+    final double? parsed = double.tryParse(raw);
+    if (parsed != null && parsed > 0) {
+      _setPrice(parsed);
+    } else {
+      _ctrl.text = _price.toInt().toString();
+    }
+  }
+
+  String _format(double v) {
+    final String s = v.toInt().toString();
+    final StringBuffer buf = StringBuffer();
+    final int rem = s.length % 3;
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (i - rem) % 3 == 0) buf.write('\u202F');
+      buf.write(s[i]);
+    }
+    return buf.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        if (widget.showLabel) ...<Widget>[
+          const Text(
+            'PRIX PROPOSÉ',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF64748B),
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF0FDF9),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFB2DDD7)),
+          ),
+          child: Row(
+            children: <Widget>[
+              _AdjButton(
+                icon: Icons.remove_rounded,
+                onTap: () => _adjust(-widget.step),
+                filled: false,
+              ),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => _focusNode.requestFocus(),
+                  behavior: HitTestBehavior.opaque,
+                  child: _editing
+                      ? TextField(
+                          controller: _ctrl,
+                          focusNode: _focusNode,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: _teal,
+                            letterSpacing: -0.3,
+                          ),
+                          decoration: const InputDecoration(
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(vertical: 4),
+                          ),
+                        )
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Text(
+                            '${_format(_price)} ${widget.currency}',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: _teal,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+              _AdjButton(
+                icon: Icons.add_rounded,
+                onTap: () => _adjust(widget.step),
+                filled: true,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AdjButton extends StatelessWidget {
+  const _AdjButton({
+    required this.icon,
+    required this.onTap,
+    required this.filled,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool filled;
+
+  static const Color _teal = Color(0xFF0F766E);
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: filled ? _teal : Colors.white,
+          borderRadius: BorderRadius.circular(11),
+          border: filled ? null : Border.all(color: const Color(0xFFCBD5E1)),
+          boxShadow: filled
+              ? <BoxShadow>[
+                  BoxShadow(
+                    color: _teal.withValues(alpha: 0.30),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
+              : null,
+        ),
+        child: Icon(
+          icon,
+          size: 20,
+          color: filled ? Colors.white : const Color(0xFF475569),
+        ),
       ),
     );
   }

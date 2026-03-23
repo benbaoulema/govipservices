@@ -150,6 +150,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
   bool _autoMode = true;
   bool _isSearchingAutoDriver = false;
   int _searchToken = 0; // incrémenté à chaque annulation pour invalider la recherche en cours
+  double? _proposedPrice; // prix proposé par le sender (null = prix calculé par défaut)
 
   // Active request watch (after ordering)
   String? _activeRequestId;
@@ -296,6 +297,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       _matches = const <ParcelServiceMatch>[];
       _selectedMatch = null;
       _hasSearchedMatches = false;
+      _proposedPrice = null;
     });
     _refreshRoutePreview();
     _refreshRequestMapViewport();
@@ -336,6 +338,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       _matches = const <ParcelServiceMatch>[];
       _selectedMatch = null;
       _hasSearchedMatches = false;
+      _proposedPrice = null;
     });
     _refreshRoutePreview();
     _refreshRequestMapViewport();
@@ -773,7 +776,11 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         _matches = matches;
         _selectedMatch = matches.isNotEmpty ? matches.first : null;
         _hasSearchedMatches = true;
-        });
+        // Initialise le prix proposé sur la première offre si pas encore défini
+        if (matches.isNotEmpty && _proposedPrice == null) {
+          _proposedPrice = matches.first.price;
+        }
+      });
     } catch (_) {
       _showMessage('Impossible de rechercher des livreurs pour le moment.');
     } finally {
@@ -950,7 +957,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
           deliveryAddress: _delivery.address,
           deliveryLat: _delivery.lat!,
           deliveryLng: _delivery.lng!,
-          price: match.price,
+          price: _proposedPrice ?? match.price,
           currency: match.currency,
           priceSource: match.priceSource,
           vehicleLabel: match.vehicleLabel,
@@ -1072,7 +1079,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         deliveryAddress: _delivery.address,
         deliveryLat: _delivery.lat!,
         deliveryLng: _delivery.lng!,
-        price: match.price,
+        price: _proposedPrice ?? match.price,
         currency: match.currency,
         priceSource: match.priceSource,
         vehicleLabel: match.vehicleLabel,
@@ -2317,6 +2324,25 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                       durationText: _routeDurationText,
                       isLoading: _isSearchingAutoDriver,
                       onOrder: _orderAutoMode,
+                      proposedPrice: _proposedPrice,
+                      onPriceChanged: (double p) =>
+                          setState(() => _proposedPrice = p),
+                    ),
+
+                  // ── Prix proposé (mode manuel) ──────────────────────────
+                  if (_activeRequestId == null &&
+                      !_autoMode &&
+                      _displayedMatches.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
+                      child: _PriceAdjusterRow(
+                        initialPrice:
+                            _proposedPrice ?? _displayedMatches.first.price,
+                        currency: _displayedMatches.first.currency,
+                        onChanged: (double p) =>
+                            setState(() => _proposedPrice = p),
+                        showLabel: false,
+                      ),
                     ),
 
                   // ── Livreurs (sticky) — masqué pendant le suivi ────────
