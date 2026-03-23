@@ -40,8 +40,10 @@ class VehicleTypeRepository {
     const List<String> priorityOrder = <String>[
       'moto',
       'tricycle',
-      'car',
+      'petit cargo',
       'cargo',
+      'voiture',
+      'remorque',
     ];
 
     String normalize(String value) => value
