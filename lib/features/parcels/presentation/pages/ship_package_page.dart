@@ -2284,7 +2284,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                   ),
 
                   // ── Mode auto panel ───────────────────────────────────
-                  if (_autoMode && _activeRequestId == null)
+                  if (_autoMode && _activeRequestId == null && !_isSearchingAutoDriver)
                     _AutoModePanel(
                       pickup: _pickup,
                       delivery: _delivery,
