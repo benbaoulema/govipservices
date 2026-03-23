@@ -1832,25 +1832,10 @@ class _VehicleChipRow extends StatelessWidget {
   final Color accent;
   final ValueChanged<VehicleType> onSelect;
 
-  IconData _icon(String name) {
-    final String n = name.toLowerCase();
-    if (n.contains('moto')) return Icons.two_wheeler_rounded;
-    if (n.contains('tricycle') || n.contains('rickshaw')) {
-      return Icons.electric_rickshaw_rounded;
-    }
-    if (n.contains('cargo') || n.contains('camion') || n.contains('van')) {
-      return Icons.local_shipping_rounded;
-    }
-    if (n.contains('car') || n.contains('voiture')) {
-      return Icons.directions_car_rounded;
-    }
-    return Icons.local_taxi_rounded;
-  }
-
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 40,
+      height: 44,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.zero,
@@ -1859,26 +1844,25 @@ class _VehicleChipRow extends StatelessWidget {
         itemBuilder: (context, index) {
           final VehicleType type = types[index];
           final bool isSelected = selected?.id == type.id;
+          final String? imageUrl = type.imageUrl;
           return GestureDetector(
             onTap: () => onSelect(type),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 color: isSelected ? accent : Colors.white,
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(22),
                 border: Border.all(
-                  color: isSelected
-                      ? accent
-                      : accent.withValues(alpha: 0.25),
+                  color: isSelected ? accent : accent.withValues(alpha: 0.25),
                   width: 1.5,
                 ),
                 boxShadow: isSelected
                     ? <BoxShadow>[
                         BoxShadow(
-                          color: accent.withValues(alpha: 0.25),
-                          blurRadius: 8,
+                          color: accent.withValues(alpha: 0.28),
+                          blurRadius: 10,
                           offset: const Offset(0, 3),
                         ),
                       ]
@@ -1887,12 +1871,21 @@ class _VehicleChipRow extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Icon(
-                    _icon(type.name),
-                    size: 16,
-                    color: isSelected ? Colors.white : accent,
-                  ),
-                  const SizedBox(width: 6),
+                  if (imageUrl != null && imageUrl.isNotEmpty)
+                    Image.network(
+                      imageUrl,
+                      width: 24,
+                      height: 24,
+                      fit: BoxFit.contain,
+                      color: isSelected ? Colors.white : null,
+                      colorBlendMode:
+                          isSelected ? BlendMode.srcIn : null,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    )
+                  else
+                    const SizedBox.shrink(),
+                  if (imageUrl != null && imageUrl.isNotEmpty)
+                    const SizedBox(width: 7),
                   Text(
                     type.name,
                     style: TextStyle(
