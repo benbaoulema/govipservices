@@ -58,12 +58,15 @@ class AppRouter {
             (args is Map && args['openAddressSheet'] == true);
         final String? resumeId =
             args is String ? args : null;
+        final String? vehicleTypeId =
+            args is Map ? args['vehicleTypeId'] as String? : null;
         final String? vehicleLabel =
             args is Map ? args['vehicleLabel'] as String? : null;
         return MaterialPageRoute<void>(
           builder: (_) => ShipPackagePage(
             resumeRequestId: resumeId,
             openAddressSheet: openSheet,
+            vehicleTypeId: vehicleTypeId,
             vehicleLabel: vehicleLabel,
           ),
           settings: settings,

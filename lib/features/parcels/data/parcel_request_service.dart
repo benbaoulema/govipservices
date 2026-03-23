@@ -368,6 +368,7 @@ class ParcelRequestService {
         .collection('demands')
         .where('requesterUid', isEqualTo: uid)
         .where('status', whereIn: <String>[
+          'provider_notified',
           'accepted',
           'en_route_to_pickup',
           'en_route',

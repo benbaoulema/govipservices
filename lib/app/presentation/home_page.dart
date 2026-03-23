@@ -10,6 +10,7 @@ import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/domain/models/trip_detail_models.dart';
 import 'package:govipservices/features/travel/presentation/pages/my_trips_page.dart';
 import 'package:govipservices/features/user/data/user_availability_service.dart';
+import 'package:govipservices/shared/services/safe_wakelock_service.dart';
 import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
 const double _topPanelMaxExtent = 424;
@@ -137,6 +138,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _featuredProTripsFuture = _loadFeaturedProTrips();
     _loadAvailability();
     _loadVehicleTypes();
+    _syncWakeLock();
   }
 
   Future<void> _loadVehicleTypes() async {
@@ -155,6 +157,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    SafeWakelockService.setEnabled(false);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -164,6 +167,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _refreshAvailabilityPosition();
     }
+    _syncWakeLock();
+  }
+
+  void _syncWakeLock() {
+    final AppLifecycleState? lifecycleState =
+        WidgetsBinding.instance.lifecycleState;
+    final bool shouldKeepScreenOn =
+        _availability.isOnline && lifecycleState == AppLifecycleState.resumed;
+    SafeWakelockService.setEnabled(shouldKeepScreenOn);
   }
 
   Future<List<TripSearchResult>> _loadFeaturedProTrips() {
@@ -178,6 +190,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {
       _availability = availability;
     });
+    _syncWakeLock();
   }
 
   Future<void> _refreshAvailabilityPosition() async {
@@ -194,6 +207,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       setState(() {
         _availability = refreshed;
       });
+      _syncWakeLock();
     } catch (_) {
       // Keep home resilient if location refresh fails in background.
     }
@@ -242,6 +256,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       setState(() {
         _availability = next;
       });
+      _syncWakeLock();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -274,6 +289,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           canProvideParcels: _availability.canProvideParcels,
         );
       });
+      _syncWakeLock();
       return;
     }
 
@@ -288,6 +304,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       setState(() {
         _availability = next;
       });
+      _syncWakeLock();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -548,6 +565,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                       AppRoutes.parcelsShipPackage,
                                       arguments: <String, dynamic>{
                                         'openAddressSheet': true,
+                                        'vehicleTypeId':
+                                            _selectedVehicleType?.id,
                                         'vehicleLabel':
                                             _selectedVehicleType?.name,
                                       },

@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:govipservices/app/navigation/app_navigator.dart';
 import 'package:govipservices/app/router/app_routes.dart';
+import 'package:govipservices/features/notifications/presentation/foreground_driver_order_ringtone_service.dart';
 import 'package:govipservices/features/parcels/data/parcel_request_service.dart';
 import 'package:govipservices/features/parcels/domain/models/parcel_request_models.dart';
 
@@ -265,6 +266,7 @@ class _GlobalParcelRequestPopupState extends State<_GlobalParcelRequestPopup>
   @override
   void initState() {
     super.initState();
+    ForegroundDriverOrderRingtoneService.instance.start();
     _timerCtrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: _totalSeconds),
@@ -279,6 +281,7 @@ class _GlobalParcelRequestPopupState extends State<_GlobalParcelRequestPopup>
 
   @override
   void dispose() {
+    ForegroundDriverOrderRingtoneService.instance.stop();
     _ticker.cancel();
     _timerCtrl.dispose();
     super.dispose();
@@ -288,6 +291,7 @@ class _GlobalParcelRequestPopupState extends State<_GlobalParcelRequestPopup>
     if (_acted) return;
     _acted = true;
     _ticker.cancel();
+    ForegroundDriverOrderRingtoneService.instance.stop();
     widget.onReject();
   }
 
@@ -295,6 +299,7 @@ class _GlobalParcelRequestPopupState extends State<_GlobalParcelRequestPopup>
     if (_acted) return;
     _acted = true;
     _ticker.cancel();
+    ForegroundDriverOrderRingtoneService.instance.stop();
     widget.onAccept();
   }
 
@@ -302,6 +307,7 @@ class _GlobalParcelRequestPopupState extends State<_GlobalParcelRequestPopup>
     if (_acted) return;
     _acted = true;
     _ticker.cancel();
+    ForegroundDriverOrderRingtoneService.instance.stop();
     widget.onReject();
   }
 

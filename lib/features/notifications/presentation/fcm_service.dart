@@ -12,6 +12,9 @@ import 'package:govipservices/features/notifications/data/push_token_repository.
 import 'package:govipservices/features/notifications/presentation/notification_navigation.dart';
 const String _foregroundChannelId = 'foreground_notifications';
 const String _foregroundChannelName = 'Foreground notifications';
+const String _driverOrdersChannelId = 'driver_new_orders_v1';
+const String _driverOrdersChannelName = 'Nouvelles commandes chauffeur';
+const String _driverOrderSoundName = 'driver_order_alert';
 const int _maxAndroidNotificationId = 2147483647;
 
 @pragma('vm:entry-point')
@@ -125,6 +128,18 @@ class FcmService {
         importance: Importance.high,
       ),
     );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _driverOrdersChannelId,
+        _driverOrdersChannelName,
+        description:
+            'Alertes prioritaires pour les nouvelles commandes chauffeur.',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+        sound: RawResourceAndroidNotificationSound(_driverOrderSoundName),
+      ),
+    );
     // Canal pour la notification persistante de course en cours
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
@@ -206,6 +221,8 @@ class FcmService {
     final String body = message.notification?.body?.trim().isNotEmpty == true
         ? message.notification!.body!.trim()
         : '${message.data['body'] ?? ''}'.trim();
+    final bool isDriverOrder =
+        '${message.data['type'] ?? ''}'.trim() == 'parcel_request_created';
 
     if (title.isEmpty && body.isEmpty) return;
 
@@ -213,18 +230,28 @@ class FcmService {
       _foregroundNotificationId(message),
       title,
       body,
-      const NotificationDetails(
+      NotificationDetails(
         android: AndroidNotificationDetails(
-          _foregroundChannelId,
-          _foregroundChannelName,
-          channelDescription: 'Displays notifications received while the app is open.',
-          importance: Importance.high,
-          priority: Priority.high,
+          isDriverOrder ? _driverOrdersChannelId : _foregroundChannelId,
+          isDriverOrder ? _driverOrdersChannelName : _foregroundChannelName,
+          channelDescription: isDriverOrder
+              ? 'Alertes prioritaires pour les nouvelles commandes chauffeur.'
+              : 'Displays notifications received while the app is open.',
+          importance: isDriverOrder ? Importance.max : Importance.high,
+          priority: isDriverOrder ? Priority.max : Priority.high,
+          playSound: isDriverOrder,
+          enableVibration: isDriverOrder,
+          sound: isDriverOrder
+              ? const RawResourceAndroidNotificationSound(
+                  _driverOrderSoundName,
+                )
+              : null,
         ),
         iOS: DarwinNotificationDetails(
           presentAlert: true,
           presentBadge: true,
           presentSound: true,
+          sound: isDriverOrder ? '$_driverOrderSoundName.aiff' : null,
         ),
       ),
       payload: jsonEncode(message.data),

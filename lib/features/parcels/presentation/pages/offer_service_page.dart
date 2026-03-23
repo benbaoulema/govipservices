@@ -889,6 +889,7 @@ class _OfferServicePageState extends State<OfferServicePage> {
                 'name': selectedVehicleType.name,
                 'imageUrl': selectedVehicleType.imageUrl,
               },
+        'vehicleTypeId': selectedVehicleType?.id,
         'isValidated': false,
         'status': 'active',
         'ownerAvailability': <String, dynamic>{

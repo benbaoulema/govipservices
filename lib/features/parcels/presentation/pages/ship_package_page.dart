@@ -1413,12 +1413,31 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     required ParcelRequestDocument request,
     required ParcelServiceMatch match,
   }) {
+    final _AddressPoint pickupPoint = _AddressPoint(
+      address: request.pickupAddress,
+      lat: request.pickupLat == 0 ? null : request.pickupLat,
+      lng: request.pickupLng == 0 ? null : request.pickupLng,
+    );
+    final _AddressPoint deliveryPoint = _AddressPoint(
+      address: request.deliveryAddress,
+      lat: request.deliveryLat == 0 ? null : request.deliveryLat,
+      lng: request.deliveryLng == 0 ? null : request.deliveryLng,
+    );
     setState(() {
+      _pickup = pickupPoint;
+      _delivery = deliveryPoint;
+      _pickupController.text = request.pickupAddress;
+      _deliveryController.text = request.deliveryAddress;
+      _routePreviewPoints = const <LatLng>[];
+      _routeDurationText = null;
       _activeRequestId = request.id;
       _activeTrackNum = request.trackNum;
       _activeMatch = match;
       _activeStatus = _SenderRequestStatus.fromFirestore(request.status);
-      _courierLivePosition = null;
+      _courierLivePosition =
+          request.courierLat != null && request.courierLng != null
+          ? LatLng(request.courierLat!, request.courierLng!)
+          : null;
       _courierEtaText = null;
     });
     // Étendre le sheet pour afficher le suivi en plein écran
@@ -1429,6 +1448,13 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
           duration: const Duration(milliseconds: 450),
           curve: Curves.easeOutCubic,
         );
+      }
+      _refreshRoutePreview();
+      final LatLng? courierPos = _courierLivePosition;
+      if (courierPos != null) {
+        _moveCameraToShowCourier(courierPos);
+      } else {
+        _refreshRequestMapViewport();
       }
     });
     _requestSub?.cancel();

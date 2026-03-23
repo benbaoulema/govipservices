@@ -13,6 +13,7 @@ import 'package:govipservices/features/parcels/presentation/services/delivery_no
 import 'package:govipservices/features/parcels/data/parcel_route_preview_service.dart';
 import 'package:govipservices/features/parcels/domain/models/parcel_request_models.dart';
 import 'package:govipservices/features/parcels/presentation/widgets/delivery_completion_dialog.dart';
+import 'package:govipservices/shared/services/safe_wakelock_service.dart';
 
 /// Statuts métier de la course côté livreur.
 ///
@@ -70,7 +71,8 @@ class ParcelDeliveryRunPage extends StatefulWidget {
   State<ParcelDeliveryRunPage> createState() => _ParcelDeliveryRunPageState();
 }
 
-class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
+class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage>
+    with WidgetsBindingObserver {
   static const Color _teal = Color(0xFF14B8A6);
   static const Color _tealDark = Color(0xFF0F766E);
 
@@ -93,6 +95,7 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _requestService = ParcelRequestService();
     _routeService = ParcelRoutePreviewService(
       apiKey: RuntimeAppConfig.googleMapsApiKey,
@@ -105,15 +108,31 @@ class _ParcelDeliveryRunPageState extends State<ParcelDeliveryRunPage> {
       pickupAddress: widget.request.pickupAddress,
       deliveryAddress: widget.request.deliveryAddress,
     );
+    _syncWakeLock();
     _init();
   }
 
   @override
   void dispose() {
+    SafeWakelockService.setEnabled(false);
+    WidgetsBinding.instance.removeObserver(this);
     DeliveryNotificationService.instance.cancel();
     _positionStream?.cancel();
     _mapController?.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _syncWakeLock();
+  }
+
+  void _syncWakeLock() {
+    final AppLifecycleState? lifecycleState =
+        WidgetsBinding.instance.lifecycleState;
+    final bool shouldKeepScreenOn =
+        lifecycleState == null || lifecycleState == AppLifecycleState.resumed;
+    SafeWakelockService.setEnabled(shouldKeepScreenOn);
   }
 
   Future<void> _init() async {

@@ -104,16 +104,22 @@ class ParcelServiceMatcher {
     required String deliveryAddress,
     required double deliveryLat,
     required double deliveryLng,
-    String? vehicleLabel,
+    String? vehicleTypeId,
   }) async {
     // 1. Cherche d'abord dans la bande lat proche
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs =
-        await _queryByLatBand(pickupLat: pickupLat, delta: _nearbyLatDelta);
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = await _queryByLatBand(
+      pickupLat: pickupLat,
+      delta: _nearbyLatDelta,
+      vehicleTypeId: vehicleTypeId,
+    );
 
     // 2. Si trop peu de résultats, élargit à tous les services
     if (docs.length < 5) {
       final List<QueryDocumentSnapshot<Map<String, dynamic>>> global =
-          await _queryAllSearchable(limit: _globalSearchLimit);
+          await _queryAllSearchable(
+        limit: _globalSearchLimit,
+        vehicleTypeId: vehicleTypeId,
+      );
       final Set<String> ids = docs.map((d) => d.id).toSet();
       docs = <QueryDocumentSnapshot<Map<String, dynamic>>>[
         ...docs,
@@ -161,6 +167,7 @@ class ParcelServiceMatcher {
             isZoneCovered: false,
             distanceToPickupMeters: distM,
             priorityRank: 1,
+            vehicleTypeId: '${typeVehicule['id'] ?? ''}'.trim(),
             vehicleLabel:
                 '${typeVehicule['name'] ?? ''}'.trim(),
           );
@@ -172,11 +179,14 @@ class ParcelServiceMatcher {
 
     // 4. Filtre par type de véhicule si demandé
     List<ParcelServiceMatch> filtered = candidates;
-    if (vehicleLabel != null && vehicleLabel.trim().isNotEmpty) {
-      final String lv = vehicleLabel.trim().toLowerCase();
+    if (_hasVehicleTypeFilter(vehicleTypeId)) {
       filtered = candidates
-          .where((ParcelServiceMatch m) =>
-              m.vehicleLabel.toLowerCase().contains(lv))
+          .where(
+            (ParcelServiceMatch m) => _vehicleMatchesRequestedId(
+              serviceVehicleTypeId: m.vehicleTypeId,
+              requestedVehicleTypeId: vehicleTypeId,
+            ),
+          )
           .toList(growable: true);
       if (filtered.isEmpty) return null;
     }
@@ -206,10 +216,15 @@ class ParcelServiceMatcher {
     required double deliveryLat,
     required double deliveryLng,
     String? deliveryPlaceId,
+    String? vehicleTypeId,
     int limit = 3,
   }) async {
     final List<QueryDocumentSnapshot<Map<String, dynamic>>> nearbyDocs =
-        await _queryByLatBand(pickupLat: pickupLat, delta: _nearbyLatDelta);
+        await _queryByLatBand(
+      pickupLat: pickupLat,
+      delta: _nearbyLatDelta,
+      vehicleTypeId: vehicleTypeId,
+    );
 
     final List<QueryDocumentSnapshot<Map<String, dynamic>>> filteredNearbyDocs =
         nearbyDocs
@@ -257,7 +272,10 @@ class ParcelServiceMatcher {
 
     final List<QueryDocumentSnapshot<Map<String, dynamic>>> globalDocs =
         shouldQueryGlobal
-            ? await _queryAllSearchable(limit: _globalSearchLimit)
+            ? await _queryAllSearchable(
+                limit: _globalSearchLimit,
+                vehicleTypeId: vehicleTypeId,
+              )
             : const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
     final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>> allDocs =
@@ -317,27 +335,55 @@ class ParcelServiceMatcher {
   Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _queryByLatBand({
     required double pickupLat,
     required double delta,
+    String? vehicleTypeId,
   }) async {
-    final QuerySnapshot<Map<String, dynamic>> snap = await _firestore
+    Query<Map<String, dynamic>> query = _firestore
         .collection('services')
         .where('status', isEqualTo: 'active')
         .where('search.isSearchable', isEqualTo: true)
         .where('search.ownerLat', isGreaterThanOrEqualTo: pickupLat - delta)
-        .where('search.ownerLat', isLessThanOrEqualTo: pickupLat + delta)
-        .get();
+        .where('search.ownerLat', isLessThanOrEqualTo: pickupLat + delta);
+    final String? normalizedVehicleTypeId = _normalizedVehicleTypeId(vehicleTypeId);
+    if (normalizedVehicleTypeId != null) {
+      query = query.where('typeVehicule.id', isEqualTo: normalizedVehicleTypeId);
+    }
+    final QuerySnapshot<Map<String, dynamic>> snap = await query.get();
     return snap.docs;
   }
 
   Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _queryAllSearchable({
     required int limit,
+    String? vehicleTypeId,
   }) async {
-    final QuerySnapshot<Map<String, dynamic>> snap = await _firestore
+    Query<Map<String, dynamic>> query = _firestore
         .collection('services')
         .where('status', isEqualTo: 'active')
-        .where('search.isSearchable', isEqualTo: true)
+        .where('search.isSearchable', isEqualTo: true);
+    final String? normalizedVehicleTypeId = _normalizedVehicleTypeId(vehicleTypeId);
+    if (normalizedVehicleTypeId != null) {
+      query = query.where('typeVehicule.id', isEqualTo: normalizedVehicleTypeId);
+    }
+    final QuerySnapshot<Map<String, dynamic>> snap = await query
         .limit(limit)
         .get();
     return snap.docs;
+  }
+
+  bool _hasVehicleTypeFilter(String? vehicleTypeId) =>
+      _normalizedVehicleTypeId(vehicleTypeId) != null;
+
+  String? _normalizedVehicleTypeId(String? vehicleTypeId) {
+    final String normalized = vehicleTypeId?.trim() ?? '';
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  bool _vehicleMatchesRequestedId({
+    required String serviceVehicleTypeId,
+    required String? requestedVehicleTypeId,
+  }) {
+    final String? requested = _normalizedVehicleTypeId(requestedVehicleTypeId);
+    if (requested == null) return true;
+    return serviceVehicleTypeId.trim() == requested;
   }
 
   _CandidateMatch? _mapServiceToCandidate({
@@ -424,6 +470,7 @@ class ParcelServiceMatcher {
         isZoneCovered: isZoneCovered,
         distanceToPickupMeters: distanceToPickupMeters,
         priorityRank: priorityRank,
+        vehicleTypeId: '${typeVehicule['id'] ?? ''}'.trim(),
         vehicleLabel: '${typeVehicule['name'] ?? 'Vehicule non precise'}'.trim(),
         ownerCity: ownerCity,
       ),

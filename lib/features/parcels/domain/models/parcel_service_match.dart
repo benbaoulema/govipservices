@@ -11,6 +11,7 @@ class ParcelServiceMatch {
     required this.isZoneCovered,
     required this.distanceToPickupMeters,
     required this.priorityRank,
+    required this.vehicleTypeId,
     required this.vehicleLabel,
     this.ownerCity,
   });
@@ -26,6 +27,7 @@ class ParcelServiceMatch {
   final bool isZoneCovered;
   final double distanceToPickupMeters;
   final int priorityRank;
+  final String vehicleTypeId;
   final String vehicleLabel;
   /// Ville actuelle du livreur (issue du géocodage inverse lors de la mise en ligne).
   /// Non null uniquement pour les rank 2 (zone couverte mais livreur loin).
