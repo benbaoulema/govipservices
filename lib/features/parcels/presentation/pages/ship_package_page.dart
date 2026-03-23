@@ -83,6 +83,7 @@ class ShipPackagePage extends StatefulWidget {
     super.key,
     this.resumeRequestId,
     this.openAddressSheet = false,
+    this.vehicleTypeId,
     this.vehicleLabel,
   });
 
@@ -91,6 +92,7 @@ class ShipPackagePage extends StatefulWidget {
 
   /// Si true, ouvre directement le sheet de saisie d'adresse à l'ouverture.
   final bool openAddressSheet;
+  final String? vehicleTypeId;
 
   /// Si non-null, filtre les drivers affichés par type de véhicule.
   final String? vehicleLabel;
@@ -128,13 +130,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
   ParcelServiceMatch? _selectedMatch;
   bool _hasSearchedMatches = false;
 
-  List<ParcelServiceMatch> get _displayedMatches {
-    final String? label = widget.vehicleLabel?.trim().toLowerCase();
-    if (label == null || label.isEmpty) return _matches;
-    return _matches
-        .where((m) => m.vehicleLabel.toLowerCase().contains(label))
-        .toList(growable: false);
-  }
+  List<ParcelServiceMatch> get _displayedMatches => _matches;
   bool _isFetchingPickupLocation = false;
   bool _isSearchingMatches = false;
   bool _isCreatingParcelRequest = false;
@@ -151,8 +147,9 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
   final DraggableScrollableController _sheetController =
       DraggableScrollableController();
 
-  bool _autoMode = false;
+  bool _autoMode = true;
   bool _isSearchingAutoDriver = false;
+  int _searchToken = 0; // incrémenté à chaque annulation pour invalider la recherche en cours
 
   // Active request watch (after ordering)
   String? _activeRequestId;
@@ -658,6 +655,10 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
 
     switch (_currentStep) {
       case _ShipStep.request:
+        if (_autoMode) {
+          await _orderAutoMode();
+          return;
+        }
         if (_matches.isNotEmpty && _selectedMatch != null) {
           _goToStep(_ShipStep.recipient);
           return;
@@ -701,6 +702,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
   void _triggerAutoSearchIfReady() {
     if (!mounted ||
         _currentStep != _ShipStep.request ||
+        _autoMode ||
         !_pickup.isComplete ||
         !_delivery.isComplete ||
         _isSearchingMatches) {
@@ -710,6 +712,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted ||
           _currentStep != _ShipStep.request ||
+          _autoMode ||
           !_pickup.isComplete ||
           !_delivery.isComplete ||
           _isSearchingMatches) {
@@ -717,6 +720,29 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       }
       _loadMatchesAndContinue();
     });
+  }
+
+  void _toggleAutoMode() {
+    final bool nextValue = !_autoMode;
+    setState(() {
+      _autoMode = nextValue;
+    });
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            nextValue
+                ? 'Choix automatique activé. GoVIP recherchera le livreur le plus adapté pour vous.'
+                : 'Choix manuel activé. Vous pourrez sélectionner vous-même un livreur disponible.',
+          ),
+        ),
+      );
+
+    if (!nextValue) {
+      _triggerAutoSearchIfReady();
+    }
   }
 
   Future<void> _loadMatchesAndContinue() async {
@@ -739,6 +765,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         deliveryLat: _delivery.lat!,
         deliveryLng: _delivery.lng!,
         deliveryPlaceId: _delivery.placeId,
+        vehicleTypeId: widget.vehicleTypeId,
       );
 
       if (!mounted) return;
@@ -967,6 +994,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       prefillReceiverPhone: _confirmedReceiverPhone,
     );
     if (confirmed == null || !mounted) return;
+    final int token = ++_searchToken;
     setState(() {
       _confirmedSenderContact = confirmed.senderContact;
       _confirmedReceiverName = confirmed.receiverName;
@@ -981,14 +1009,22 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
         senderContact: confirmed.senderContact,
         receiverName: confirmed.receiverName,
         receiverPhone: confirmed.receiverPhone,
+        token: token,
       );
     } catch (_) {
-      if (mounted) {
+      if (mounted && token == _searchToken) {
         _showMessage('Impossible de trouver un livreur pour le moment.');
       }
     } finally {
-      if (mounted) setState(() => _isSearchingAutoDriver = false);
+      if (mounted && token == _searchToken) {
+        setState(() => _isSearchingAutoDriver = false);
+      }
     }
+  }
+
+  void _cancelAutoSearch() {
+    _searchToken++; // invalide la recherche en cours
+    if (mounted) setState(() => _isSearchingAutoDriver = false);
   }
 
   /// Cherche le driver le plus proche et crée la demande.
@@ -999,6 +1035,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
     required String senderContact,
     required String receiverName,
     required String receiverPhone,
+    required int token,
   }) async {
     final ParcelServiceMatch? match =
         await _parcelServiceMatcher.findNearestAvailableDriver(
@@ -1008,10 +1045,10 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       deliveryAddress: _delivery.address,
       deliveryLat: _delivery.lat!,
       deliveryLng: _delivery.lng!,
-      vehicleLabel: widget.vehicleLabel,
+      vehicleTypeId: widget.vehicleTypeId,
     );
 
-    if (!mounted) return;
+    if (!mounted || token != _searchToken) return;
 
     if (match == null) {
       _showMessage(
@@ -1095,12 +1132,14 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       final _RequesterIdentity requester =
           await _loadAuthenticatedRequesterIdentity(user);
       if (!mounted) return;
+      final int token = ++_searchToken;
       await _dispatchToNearestDriver(
         requesterUid: requester.uid,
         requesterName: requester.name,
         senderContact: _confirmedSenderContact,
         receiverName: _confirmedReceiverName,
         receiverPhone: _confirmedReceiverPhone,
+        token: token,
       );
     } catch (_) {
       if (mounted) _showMessage('Impossible de trouver un livreur pour le moment.');
@@ -1364,6 +1403,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
       isZoneCovered: true,
       distanceToPickupMeters: 0,
       priorityRank: 1,
+      vehicleTypeId: '',
       vehicleLabel: doc.vehicleLabel,
     );
     _startWatchingRequest(request: doc, match: match);
@@ -1516,7 +1556,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
             backgroundColor: const Color(0xFF991B1B),
             content: Text(
               error is StateError
-                  ? error.message ?? 'La demande ne peut plus être annulée.'
+                  ? error.message
                   : 'Impossible d’annuler la demande pour le moment.',
             ),
           ),
@@ -2109,15 +2149,15 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
             ],
           ),
         ),
-        // ── Switch "Mode auto" flottant au-dessus du sheet ──────────────
-        if (_activeRequestId == null)
+        // ── Switch de choix du livreur flottant au-dessus du sheet ──────
+        if (_activeRequestId == null && !_isSearchingAutoDriver)
           Positioned(
             bottom: MediaQuery.of(context).size.height * 0.40 + 12,
             left: 20,
             right: 20,
             child: Center(
               child: GestureDetector(
-                onTap: () => setState(() => _autoMode = !_autoMode),
+                onTap: _toggleAutoMode,
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 260),
                   curve: Curves.easeOutCubic,
@@ -2155,7 +2195,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        'Mode auto',
+                        'Choix automatique du livreur',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -2396,7 +2436,13 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                   ],
 
                   // ── Waiting / Formulaire ──────────────────────────────
-                  if (_activeRequestId != null)
+                  if (_isSearchingAutoDriver && _activeRequestId == null)
+                    _RadarPendingView(
+                      isSearching: true,
+                      scrollController: scrollController,
+                      onCancel: _cancelAutoSearch,
+                    )
+                  else if (_activeRequestId != null)
                     _WaitingInlineContent(
                       match: _activeMatch!,
                       trackNum: _activeTrackNum ?? '',
@@ -2768,7 +2814,16 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                                   : null,
                             ),
                             child: Center(
-                              child: _isSearchingMatches
+                              child: _autoMode && _isSearchingAutoDriver
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2.5,
+                                      ),
+                                    )
+                                  : _isSearchingMatches
                                   ? const SizedBox(
                                       width: 24,
                                       height: 24,
@@ -2787,10 +2842,12 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                                         ),
                                         const SizedBox(width: 10),
                                         Text(
-                                          _displayedMatches.isNotEmpty &&
-                                                  _selectedMatch != null
-                                              ? 'Continuer'
-                                              : 'Voir les livreurs',
+                                          _autoMode
+                                              ? 'Trouver un livreur'
+                                              : _displayedMatches.isNotEmpty &&
+                                                      _selectedMatch != null
+                                                  ? 'Continuer'
+                                                  : 'Voir les livreurs',
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 16,

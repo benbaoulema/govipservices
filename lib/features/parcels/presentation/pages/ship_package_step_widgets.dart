@@ -304,6 +304,7 @@ class _WaitingInlineContentState extends State<_WaitingInlineContent>
         ],
       ),
     );
+
   }
 }
 
@@ -1059,15 +1060,20 @@ class _BottomActionBar extends StatelessWidget {
 
 class _RadarPendingView extends StatefulWidget {
   const _RadarPendingView({
-    required this.match,
     required this.scrollController,
+    this.match,
+    this.isSearching = false,
     this.onCancel,
     this.onTimeout,
   });
 
   static const int _kTimeoutSeconds = 30;
 
-  final ParcelServiceMatch match;
+  /// null quand on est encore en phase de recherche (pas de driver trouvé)
+  final ParcelServiceMatch? match;
+
+  /// true : on cherche un livreur — false : on attend sa réponse
+  final bool isSearching;
   final ScrollController scrollController;
   final VoidCallback? onCancel;
   final VoidCallback? onTimeout;
@@ -1088,11 +1094,14 @@ class _RadarPendingViewState extends State<_RadarPendingView>
   void initState() {
     super.initState();
     _countdown = _RadarPendingView._kTimeoutSeconds;
+    // Searching : anneaux plus rapides pour traduire l'activité
+    final int ms = widget.isSearching ? 1800 : 2600;
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2600),
+      duration: Duration(milliseconds: ms),
     )..repeat();
-    if (widget.onTimeout != null) {
+    // Countdown seulement en phase waiting (driver trouvé)
+    if (!widget.isSearching && widget.onTimeout != null) {
       _timer = Timer.periodic(const Duration(seconds: 1), (t) {
         if (!mounted) { t.cancel(); return; }
         setState(() => _countdown--);
@@ -1141,9 +1150,10 @@ class _RadarPendingViewState extends State<_RadarPendingView>
   @override
   Widget build(BuildContext context) {
     final double bottomPad = MediaQuery.of(context).padding.bottom + 24;
-    final String name = widget.match.contactName;
+    final bool searching = widget.isSearching;
+    final String? name = widget.match?.contactName;
     final String initial =
-        name.isNotEmpty ? name[0].toUpperCase() : '?';
+        (name != null && name.isNotEmpty) ? name[0].toUpperCase() : '';
 
     return Expanded(
       child: ListView(
@@ -1158,7 +1168,6 @@ class _RadarPendingViewState extends State<_RadarPendingView>
                 _buildRing(0.0),
                 _buildRing(0.33),
                 _buildRing(0.67),
-                // Avatar central + arc countdown
                 Center(
                   child: AnimatedBuilder(
                     animation: _ctrl,
@@ -1166,19 +1175,21 @@ class _RadarPendingViewState extends State<_RadarPendingView>
                       final double half = _ctrl.value < 0.5
                           ? _ctrl.value * 2
                           : (1.0 - _ctrl.value) * 2;
-                      final double pulse = 1.0 + 0.06 * half;
+                      final double pulse =
+                          searching ? 1.0 + 0.10 * half : 1.0 + 0.06 * half;
                       return Transform.scale(scale: pulse, child: child);
                     },
                     child: Stack(
                       alignment: Alignment.center,
                       children: <Widget>[
-                        // Arc de countdown (visible seulement si onTimeout actif)
-                        if (widget.onTimeout != null)
+                        // Arc countdown (uniquement en mode waiting)
+                        if (!searching && widget.onTimeout != null)
                           SizedBox(
                             width: 92,
                             height: 92,
                             child: CircularProgressIndicator(
-                              value: _countdown / _RadarPendingView._kTimeoutSeconds,
+                              value: _countdown /
+                                  _RadarPendingView._kTimeoutSeconds,
                               strokeWidth: 2.5,
                               backgroundColor:
                                   Colors.white.withValues(alpha: 0.15),
@@ -1202,14 +1213,22 @@ class _RadarPendingViewState extends State<_RadarPendingView>
                             ],
                           ),
                           child: Center(
-                            child: Text(
-                              initial,
-                              style: const TextStyle(
-                                fontSize: 30,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white,
-                              ),
-                            ),
+                            child: searching
+                                // Icône générique pendant la recherche
+                                ? const Icon(
+                                    Icons.two_wheeler_rounded,
+                                    color: Colors.white,
+                                    size: 34,
+                                  )
+                                // Initiale du driver une fois trouvé
+                                : Text(
+                                    initial,
+                                    style: const TextStyle(
+                                      fontSize: 30,
+                                      fontWeight: FontWeight.w900,
+                                      color: Colors.white,
+                                    ),
+                                  ),
                           ),
                         ),
                       ],
@@ -1223,31 +1242,39 @@ class _RadarPendingViewState extends State<_RadarPendingView>
           const SizedBox(height: 28),
 
           // ── Texte ─────────────────────────────────────────────────────────
-          const Text(
-            'En attente de',
+          Text(
+            searching ? 'Recherche en cours…' : 'En attente de',
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 14,
-              color: Color(0xFF94A3B8),
-              fontWeight: FontWeight.w500,
+              fontSize: searching ? 20 : 14,
+              fontWeight:
+                  searching ? FontWeight.w700 : FontWeight.w500,
+              color: searching
+                  ? const Color(0xFF0F172A)
+                  : const Color(0xFF94A3B8),
+              letterSpacing: searching ? -0.3 : 0,
             ),
           ),
-          const SizedBox(height: 6),
+          if (!searching && name != null) ...<Widget>[
+            const SizedBox(height: 6),
+            Text(
+              name,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF0F172A),
+                letterSpacing: -0.4,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
           Text(
-            name,
+            searching
+                ? 'Nous cherchons le coursier disponible\nle plus proche de votre départ.'
+                : 'Votre demande a été envoyée.\nLe coursier va répondre dans quelques instants.',
             textAlign: TextAlign.center,
             style: const TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              color: Color(0xFF0F172A),
-              letterSpacing: -0.4,
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Votre demande a été envoyée.\nLe coursier va répondre dans quelques instants.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
               fontSize: 13,
               height: 1.5,
               color: Color(0xFF64748B),
@@ -1265,15 +1292,18 @@ class _RadarPendingViewState extends State<_RadarPendingView>
                 onPressed: widget.onCancel,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFFDC2626),
-                  side:
-                      const BorderSide(color: Color(0xFFDC2626), width: 1.5),
+                  side: const BorderSide(
+                      color: Color(0xFFDC2626), width: 1.5),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
                 ),
-                child: const Text(
-                  'Annuler la demande',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                child: Text(
+                  searching
+                      ? 'Annuler la recherche'
+                      : 'Annuler la demande',
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w700),
                 ),
               ),
             ),
@@ -1340,7 +1370,7 @@ class _AutoModePanel extends StatelessWidget {
     final double price = _estimatedPrice;
     final double km = _distanceKm;
 
-    return Padding(
+    final Widget panel = Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 320),
@@ -1350,25 +1380,25 @@ class _AutoModePanel extends StatelessWidget {
               ? const LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: <Color>[Color(0xFF0F766E), Color(0xFF0D9488)],
+                  colors: <Color>[Color(0xFFFFFCF7), Color(0xFFF7FAFC)],
                 )
               : null,
           color: ready ? null : const Color(0xFFF8FAFC),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: ready
-                ? Colors.transparent
+                ? const Color(0xFFE7EBF2)
                 : const Color(0xFFE2E8F0),
           ),
-          boxShadow: ready
-              ? <BoxShadow>[
-                  BoxShadow(
-                    color: _teal.withValues(alpha: 0.25),
-                    blurRadius: 20,
-                    offset: const Offset(0, 6),
-                  ),
-                ]
-              : null,
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: ready
+                  ? const Color(0x140F172A)
+                  : const Color(0x0A0F172A),
+              blurRadius: ready ? 24 : 12,
+              offset: const Offset(0, 10),
+            ),
+          ],
         ),
         padding: const EdgeInsets.all(18),
         child: ready
@@ -1379,7 +1409,7 @@ class _AutoModePanel extends StatelessWidget {
                   Row(
                     children: <Widget>[
                       const Icon(Icons.my_location_rounded,
-                          size: 14, color: Colors.white70),
+                          size: 14, color: _teal),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -1388,8 +1418,8 @@ class _AutoModePanel extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 12,
-                            color: Colors.white70,
-                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF64748B),
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
@@ -1398,15 +1428,18 @@ class _AutoModePanel extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(left: 6, top: 2, bottom: 2),
                     child: Container(
-                      width: 1,
-                      height: 10,
-                      color: Colors.white30,
+                      width: 2,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD9E2EC),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
                     ),
                   ),
                   Row(
                     children: <Widget>[
                       const Icon(Icons.flag_rounded,
-                          size: 14, color: Colors.white70),
+                          size: 14, color: Color(0xFF6D28D9)),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -1415,8 +1448,8 @@ class _AutoModePanel extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 12,
-                            color: Colors.white70,
-                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF64748B),
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
@@ -1432,11 +1465,11 @@ class _AutoModePanel extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
                             const Text(
-                              'Tarif estimé',
+                              'Tarif estime',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Colors.white70,
-                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF64748B),
+                                fontWeight: FontWeight.w700,
                                 letterSpacing: 0.4,
                               ),
                             ),
@@ -1446,7 +1479,7 @@ class _AutoModePanel extends StatelessWidget {
                               style: const TextStyle(
                                 fontSize: 26,
                                 fontWeight: FontWeight.w900,
-                                color: Colors.white,
+                                color: Color(0xFF0F172A),
                                 letterSpacing: -0.5,
                               ),
                             ),
@@ -1476,43 +1509,61 @@ class _AutoModePanel extends StatelessWidget {
                   // Bouton Commander
                   SizedBox(
                     width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton(
-                      onPressed: isLoading ? null : onOrder,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: _teal,
-                        disabledBackgroundColor:
-                            Colors.white.withValues(alpha: 0.7),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                    height: 54,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: <Color>[Color(0xFF172030), Color(0xFF243247)],
                         ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: const <BoxShadow>[
+                          BoxShadow(
+                            color: Color(0x2A0F172A),
+                            blurRadius: 16,
+                            offset: Offset(0, 10),
+                          ),
+                        ],
                       ),
-                      child: isLoading
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(Color(0xFF0F766E)),
-                              ),
-                            )
-                          : const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: <Widget>[
-                                Icon(Icons.bolt_rounded, size: 20),
-                                SizedBox(width: 6),
-                                Text(
-                                  'Commander',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w900,
-                                  ),
+                      child: ElevatedButton(
+                        onPressed: isLoading ? null : onOrder,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.transparent,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        child: isLoading
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  valueColor:
+                                      AlwaysStoppedAnimation<Color>(Colors.white),
                                 ),
-                              ],
-                            ),
+                              )
+                            : const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: <Widget>[
+                                  Icon(Icons.auto_awesome_rounded, size: 18),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Commander maintenant',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.1,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
                     ),
                   ),
                 ],
@@ -1534,6 +1585,8 @@ class _AutoModePanel extends StatelessWidget {
               ),
       ),
     );
+
+    return panel;
   }
 }
 
@@ -1546,22 +1599,23 @@ class _InfoPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.18),
+        color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(icon, size: 12, color: Colors.white),
+          Icon(icon, size: 12, color: const Color(0xFF475569)),
           const SizedBox(width: 4),
           Text(
             label,
             style: const TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w700,
-              color: Colors.white,
+              color: Color(0xFF334155),
             ),
           ),
         ],
