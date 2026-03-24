@@ -384,6 +384,49 @@ class VoyageTicketPage extends StatelessWidget {
               ),
               pw.SizedBox(height: 16),
 
+              // Services Confort
+              if (booking.comfortOptions.isNotEmpty) ...[
+                pw.Container(
+                  width: double.infinity,
+                  padding: const pw.EdgeInsets.all(14),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey300),
+                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(10)),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('Services Confort',
+                          style: pw.TextStyle(
+                              fontSize: 11,
+                              fontWeight: pw.FontWeight.bold,
+                              color: PdfColors.grey600)),
+                      pw.SizedBox(height: 8),
+                      pw.Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: booking.comfortOptions.map((id) {
+                          final String label = _comfortOptionLabel(id);
+                          return pw.Container(
+                            padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: pw.BoxDecoration(
+                              color: PdfColor.fromHex('E6FAF7'),
+                              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+                            ),
+                            child: pw.Text(label,
+                                style: pw.TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: pw.FontWeight.bold,
+                                    color: PdfColor.fromHex('007A63'))),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(height: 16),
+              ],
+
               // Prix
               if (booking.totalPrice > 0)
                 pw.Container(
