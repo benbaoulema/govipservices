@@ -956,6 +956,7 @@ class _SuccessBodyState extends State<_SuccessBody> {
                               requesterName: requesterName,
                               requesterContact: requesterContact,
                               requesterEmail: authUser?.email,
+                              effectiveDepartureDate: cubit.displayDate,
                               segmentFrom: segment.departureNode.address,
                               segmentTo: segment.arrivalNode.address,
                               segmentPrice: segment.segmentPrice,
@@ -1042,9 +1043,91 @@ class _SuccessBodyState extends State<_SuccessBody> {
     final List<VoyageBookingDocument> pendingBookings = _ownerBookings
         .where((booking) => booking.status.trim().toLowerCase() == 'pending')
         .toList(growable: false);
-    final double bottomPanelHeight = _showsManagementPanel ? 96 : 0;
-    final Widget? fixedBottomPanel = _showsManagementPanel
-        ? SafeArea(
+    return Column(
+      children: [
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _refreshDetail,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _animateSection(TripSegmentCard(
+                    dateLabel: _formatFrDate(cubit.displayDate),
+                    frequencyLabel: cubit.frequencyLabel,
+                    seats: state.availableSeats ?? trip.seats,
+                    segment: segment,
+                    canPickDate: cubit.canSelectTravelDate,
+                    showNotice: cubit.showAutoAdjustedDateNotice,
+                    noticeText: cubit.autoAdjustedDateMessage,
+                    onPickDate: () => _pickTravelDate(context),
+                  ), delayMs: 20),
+                  const SizedBox(height: 12),
+                  _animateSection(
+                    TripTimelineWidget(
+                      segment: segment,
+                      showAlternativeDepartures: trip.intermediateStops.isNotEmpty,
+                      onOpenAlternativeDepartures: () => _showDepartureOptions(
+                        context,
+                        nodes: state.nodes,
+                        segment: segment,
+                      ),
+                      showAlternativeArrivals: trip.intermediateStops.isNotEmpty,
+                      onOpenAlternativeArrivals: () => _showArrivalOptions(
+                        context,
+                        nodes: state.nodes,
+                        segment: segment,
+                      ),
+                    ),
+                    delayMs: 70,
+                  ),
+                  const SizedBox(height: 12),
+                  if (!hidePrice) ...[
+                    _animateSection(TripFareCard(
+                      unitFare: segment.segmentPrice,
+                      currency: trip.currency,
+                      seats: state.selectedSeats,
+                      total: cubit.totalFare,
+                    ), delayMs: 120),
+                    const SizedBox(height: 12),
+                  ],
+                  _animateSection(TripDriverCard(driver: trip.driver), delayMs: 160),
+                  const SizedBox(height: 12),
+                  _animateSection(TripVehicleCard(vehicle: trip.vehicle), delayMs: 210),
+                  const SizedBox(height: 12),
+                  _animateSection(TripOptionsChips(options: trip.options), delayMs: 250),
+                  if (_showsManagementPanel && pendingBookings.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    _animateSection(
+                      _InlineBookingsPanel(
+                        bookings: pendingBookings.take(3).toList(growable: false),
+                        busyBookingId: _inlineBusyBookingId,
+                        onAccept: (booking) => _setInlineBookingStatus(
+                          context,
+                          booking,
+                          'accepted',
+                        ),
+                        onReject: (booking) => _setInlineBookingStatus(
+                          context,
+                          booking,
+                          'rejected',
+                        ),
+                        onViewAll: () => _showRelatedBookings(context, trip),
+                      ),
+                      delayMs: 285,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (_showsManagementPanel)
+          SafeArea(
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
@@ -1057,107 +1140,62 @@ class _SuccessBodyState extends State<_SuccessBody> {
               ),
             ),
           )
-        : null;
-
-    return Stack(
-      children: [
-        RefreshIndicator(
-          onRefresh: _refreshDetail,
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(
-              parent: BouncingScrollPhysics(),
-            ),
-            padding: EdgeInsets.fromLTRB(16, 10, 16, bottomPanelHeight + 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _animateSection(TripSegmentCard(
-                  dateLabel: _formatFrDate(cubit.displayDate),
-                  frequencyLabel: cubit.frequencyLabel,
-                  seats: trip.seats,
-                  segment: segment,
-                ), delayMs: 20),
-                const SizedBox(height: 12),
-                _animateSection(
-                  TripTimelineWidget(
-                    segment: segment,
-                    showAlternativeDepartures: trip.intermediateStops.isNotEmpty,
-                    onOpenAlternativeDepartures: () => _showDepartureOptions(
-                      context,
-                      nodes: state.nodes,
-                      segment: segment,
-                    ),
-                    showAlternativeArrivals: trip.intermediateStops.isNotEmpty,
-                    onOpenAlternativeArrivals: () => _showArrivalOptions(
-                      context,
-                      nodes: state.nodes,
-                      segment: segment,
-                    ),
-                  ),
-                  delayMs: 70,
+        else
+          Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Color(0xFFE8EDF5))),
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0x10000000),
+                  blurRadius: 12,
+                  offset: Offset(0, -3),
                 ),
-                const SizedBox(height: 12),
-                if (!hidePrice) ...[
-                  _animateSection(TripFareCard(
-                    unitFare: segment.segmentPrice,
-                    currency: trip.currency,
-                    seats: state.selectedSeats,
-                    total: cubit.totalFare,
-                  ), delayMs: 120),
-                  const SizedBox(height: 12),
-                ],
-                _animateSection(TripDriverCard(driver: trip.driver), delayMs: 160),
-                const SizedBox(height: 12),
-                _animateSection(TripVehicleCard(vehicle: trip.vehicle), delayMs: 210),
-                const SizedBox(height: 12),
-                _animateSection(TripOptionsChips(options: trip.options), delayMs: 250),
-                const SizedBox(height: 14),
-                if (_showsManagementPanel && pendingBookings.isNotEmpty) ...[
-                  _animateSection(
-                    _InlineBookingsPanel(
-                      bookings: pendingBookings.take(3).toList(growable: false),
-                      busyBookingId: _inlineBusyBookingId,
-                      onAccept: (booking) => _setInlineBookingStatus(
-                        context,
-                        booking,
-                        'accepted',
-                      ),
-                      onReject: (booking) => _setInlineBookingStatus(
-                        context,
-                        booking,
-                        'rejected',
-                      ),
-                      onViewAll: () => _showRelatedBookings(context, trip),
-                    ),
-                    delayMs: 285,
-                  ),
-                  const SizedBox(height: 14),
-                ],
-                if (!_showsManagementPanel)
-                  _animateSection(TripBookingPanel(
-                    selectedSeats: state.selectedSeats,
-                    maxSeats: trip.seats < 1 ? 1 : trip.seats,
-                    currency: trip.currency,
-                    total: cubit.totalFare,
-                    hidePrice: hidePrice,
-                    canBook: cubit.isBookable,
-                    onIncrement: cubit.incrementSeats,
-                    onDecrement: cubit.decrementSeats,
-                    onBook: () {
-                      _onBookPressed(context);
-                    },
-                  ), delayMs: 300),
               ],
             ),
-          ),
-        ),
-        if (fixedBottomPanel != null)
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: fixedBottomPanel,
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                child: TripBookingPanel(
+                  selectedSeats: state.selectedSeats,
+                  maxSeats: (state.availableSeats ?? trip.seats) < 1
+                      ? 1
+                      : (state.availableSeats ?? trip.seats),
+                  currency: trip.currency,
+                  total: cubit.totalFare,
+                  hidePrice: hidePrice,
+                  canBook: cubit.isBookable,
+                  onIncrement: cubit.incrementSeats,
+                  onDecrement: cubit.decrementSeats,
+                  onBook: () => _onBookPressed(context),
+                ),
+              ),
+            ),
           ),
       ],
     );
+  }
+
+  Future<void> _pickTravelDate(BuildContext context) async {
+    final TripDetailModel? trip = cubit.state.trip;
+    if (trip == null || !cubit.canSelectTravelDate) return;
+    final DateTime now = DateTime.now();
+    final DateTime initialDate = DateTime.tryParse(cubit.displayDate) ?? now;
+    final DateTime firstDate = DateTime(now.year, now.month, now.day);
+    final DateTime lastDate = firstDate.add(const Duration(days: 365));
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate.isBefore(firstDate) ? firstDate : initialDate,
+      firstDate: firstDate,
+      lastDate: lastDate,
+      selectableDayPredicate: cubit.isSelectableTravelDate,
+      helpText: 'Choisir la date du voyage',
+      cancelText: 'Annuler',
+      confirmText: 'Valider',
+    );
+    if (picked == null) return;
+    await cubit.selectTravelDate(picked);
   }
 }
 
@@ -1308,6 +1346,7 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
           requesterContact: passengerContacts.first,
           requesterEmail: widget.authUser?.email,
           idempotencyKey: _submissionKey,
+          effectiveDepartureDate: widget.displayDate,
           segmentFrom: widget.segment.departureNode.address,
           segmentTo: widget.segment.arrivalNode.address,
           segmentPrice: widget.segment.segmentPrice,
@@ -1922,6 +1961,10 @@ class TripSegmentCard extends StatelessWidget {
     required this.frequencyLabel,
     required this.seats,
     required this.segment,
+    required this.canPickDate,
+    required this.showNotice,
+    required this.noticeText,
+    this.onPickDate,
     super.key,
   });
 
@@ -1929,6 +1972,10 @@ class TripSegmentCard extends StatelessWidget {
   final String frequencyLabel;
   final int seats;
   final TripSegmentModel segment;
+  final bool canPickDate;
+  final bool showNotice;
+  final String noticeText;
+  final VoidCallback? onPickDate;
 
   @override
   Widget build(BuildContext context) {
@@ -1945,10 +1992,40 @@ class TripSegmentCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                dateLabel,
-                style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF1A2747)),
-              ),
+              if (canPickDate)
+                GestureDetector(
+                  onTap: onPickDate,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: _travelAccentSoft,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: _travelAccentDark.withValues(alpha: 0.25)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.calendar_month_rounded, size: 14, color: _travelAccentDark),
+                        const SizedBox(width: 5),
+                        Text(
+                          dateLabel,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            color: _travelAccentDark,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.expand_more_rounded, size: 15, color: _travelAccentDark),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                Text(
+                  dateLabel,
+                  style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF1A2747)),
+                ),
               const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1989,6 +2066,38 @@ class TripSegmentCard extends StatelessWidget {
               ),
             ],
           ),
+          if (showNotice) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF7ED),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFED7AA)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 1),
+                    child: Icon(Icons.info_outline_rounded, size: 15, color: Color(0xFF9A3412)),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      noticeText,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF9A3412),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
         ],
       ),
@@ -2933,6 +3042,7 @@ class _RelatedBookingsSheetContentState extends State<_RelatedBookingsSheetConte
                   tripCurrency: item.tripCurrency,
                   tripDepartureDate: item.tripDepartureDate,
                   tripDepartureTime: item.tripDepartureTime,
+                  tripFrequency: item.tripFrequency,
                   tripDeparturePlace: item.tripDeparturePlace,
                   tripArrivalEstimatedTime: item.tripArrivalEstimatedTime,
                   tripArrivalPlace: item.tripArrivalPlace,

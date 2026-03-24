@@ -36,6 +36,7 @@ class CreateVoyageBookingInput {
     this.requesterTrackNum,
     this.requesterEmail,
     this.idempotencyKey,
+    this.effectiveDepartureDate,
   });
 
   final String tripId;
@@ -46,6 +47,7 @@ class CreateVoyageBookingInput {
   final String requesterContact;
   final String? requesterEmail;
   final String? idempotencyKey;
+  final String? effectiveDepartureDate;
   final String segmentFrom;
   final String segmentTo;
   final int segmentPrice;
@@ -63,6 +65,7 @@ class VoyageBookingDocument {
     required this.tripCurrency,
     required this.tripDepartureDate,
     required this.tripDepartureTime,
+    required this.tripFrequency,
     required this.tripDeparturePlace,
     required this.tripArrivalEstimatedTime,
     required this.tripArrivalPlace,
@@ -97,6 +100,7 @@ class VoyageBookingDocument {
   final String tripCurrency;
   final String tripDepartureDate;
   final String tripDepartureTime;
+  final String tripFrequency;
   final String tripDeparturePlace;
   final String tripArrivalEstimatedTime;
   final String tripArrivalPlace;
@@ -131,6 +135,7 @@ class VoyageBookingDocument {
       'tripCurrency': tripCurrency,
       'tripDepartureDate': tripDepartureDate,
       'tripDepartureTime': tripDepartureTime,
+      'tripFrequency': tripFrequency,
       'tripDeparturePlace': tripDeparturePlace,
       'tripArrivalEstimatedTime': tripArrivalEstimatedTime,
       'tripArrivalPlace': tripArrivalPlace,
@@ -169,6 +174,7 @@ class VoyageBookingDocument {
       tripCurrency: (map['tripCurrency'] as String? ?? '').trim(),
       tripDepartureDate: (map['tripDepartureDate'] as String? ?? '').trim(),
       tripDepartureTime: (map['tripDepartureTime'] as String? ?? '').trim(),
+      tripFrequency: (map['tripFrequency'] as String? ?? 'none').trim(),
       tripDeparturePlace: (map['tripDeparturePlace'] as String? ?? '').trim(),
       tripArrivalEstimatedTime: (map['tripArrivalEstimatedTime'] as String? ?? '').trim(),
       tripArrivalPlace: (map['tripArrivalPlace'] as String? ?? '').trim(),

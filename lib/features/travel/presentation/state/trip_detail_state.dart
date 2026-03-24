@@ -15,6 +15,7 @@ class TripDetailState {
     this.nodes = const <TripRouteNode>[],
     this.segment,
     this.selectedSeats = 1,
+    this.availableSeats,
     this.errorMessage,
   });
 
@@ -23,6 +24,7 @@ class TripDetailState {
   final List<TripRouteNode> nodes;
   final TripSegmentModel? segment;
   final int selectedSeats;
+  final int? availableSeats;
   final String? errorMessage;
 
   TripDetailState copyWith({
@@ -31,6 +33,7 @@ class TripDetailState {
     List<TripRouteNode>? nodes,
     TripSegmentModel? segment,
     int? selectedSeats,
+    int? availableSeats,
     String? errorMessage,
     bool clearError = false,
   }) {
@@ -40,6 +43,7 @@ class TripDetailState {
       nodes: nodes ?? this.nodes,
       segment: segment ?? this.segment,
       selectedSeats: selectedSeats ?? this.selectedSeats,
+      availableSeats: availableSeats ?? this.availableSeats,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
     );
   }

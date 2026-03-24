@@ -40,14 +40,31 @@ class VoyageBookingService {
         throw Exception('Trajet introuvable.');
       }
       final Map<String, dynamic> trip = tripSnap.data()!;
+      final String tripFrequency =
+          _normalizedTripFrequency(_toStringSafe(trip['tripFrequency']));
+      final String effectiveDepartureDate =
+          _resolveEffectiveDepartureDate(input, trip);
+      final bool usesOccurrences = tripFrequency != 'none';
 
       final String? tripError = validateVoyageTripForBooking(
         trip: trip,
         requestedSeats: input.requestedSeats,
+        effectiveDepartureDate: effectiveDepartureDate,
       );
       if (tripError != null) throw Exception(tripError);
 
-      final int availableSeats = _toInt(trip['seats'], 0);
+      final int baseCapacity = _toInt(trip['seats'], 0);
+      final int availableSeats = usesOccurrences
+          ? await _readAvailableSeatsForOccurrence(
+              transaction: transaction,
+              tripRef: tripRef,
+              effectiveDepartureDate: effectiveDepartureDate,
+              baseCapacity: baseCapacity,
+            )
+          : baseCapacity;
+      if (availableSeats < input.requestedSeats) {
+        throw Exception('Places insuffisantes pour cette date.');
+      }
       final int totalPrice = computeVoyageBookingTotalPrice(
         segmentPrice: input.segmentPrice,
         requestedSeats: input.requestedSeats,
@@ -61,8 +78,9 @@ class VoyageBookingService {
         'tripOwnerUid': _toStringSafe(trip['ownerUid']),
         'tripOwnerTrackNum': _toStringSafe(trip['ownerTrackNum']),
         'tripCurrency': _toStringSafe(trip['currency']).isEmpty ? 'XOF' : _toStringSafe(trip['currency']),
-        'tripDepartureDate': _toStringSafe(trip['departureDate']),
+        'tripDepartureDate': effectiveDepartureDate,
         'tripDepartureTime': _toStringSafe(trip['departureTime']),
+        'tripFrequency': tripFrequency,
         'tripDeparturePlace': _toStringSafe(trip['departurePlace']),
         'tripArrivalEstimatedTime': _toStringSafe(trip['arrivalEstimatedTime']),
         'tripArrivalPlace': _toStringSafe(trip['arrivalPlace']),
@@ -89,10 +107,27 @@ class VoyageBookingService {
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      transaction.update(tripRef, <String, dynamic>{
-        'seats': availableSeats - input.requestedSeats,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      if (usesOccurrences) {
+        final int nextRemainingSeats = availableSeats - input.requestedSeats;
+        transaction.set(
+          _occurrenceRef(tripRef, effectiveDepartureDate),
+          <String, dynamic>{
+            'date': effectiveDepartureDate,
+            'capacity': baseCapacity,
+            'bookedSeats': (baseCapacity - nextRemainingSeats).clamp(0, baseCapacity),
+            'remainingSeats': nextRemainingSeats,
+            'status': nextRemainingSeats > 0 ? 'active' : 'full',
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      } else {
+        transaction.update(tripRef, <String, dynamic>{
+          'seats': availableSeats - input.requestedSeats,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
       transaction.set(bookingRef, bookingMap);
     });
 
@@ -265,26 +300,59 @@ class VoyageBookingService {
         final DocumentSnapshot<Map<String, dynamic>> tripSnapshot =
             await transaction.get(tripRef);
         if (tripSnapshot.exists && tripSnapshot.data() != null) {
-          final int availableSeats = _toInt(tripSnapshot.data()!['seats'], 0);
-          final int nextSeats = _computeAvailableSeatsAfterStatusTransition(
-            availableSeats: availableSeats,
-            requestedSeats: booking.requestedSeats,
-            previousStatus: previousStatus,
-            nextStatus: normalizedStatus,
+          final String tripFrequency = _normalizedTripFrequency(
+            _toStringSafe(tripSnapshot.data()!['tripFrequency']),
           );
+          final String tripDepartureDate = booking.tripDepartureDate.trim();
+          final bool usesOccurrences = tripFrequency != 'none';
 
-          if (nextSeats != availableSeats) {
-            if (nextSeats < 0) {
-              throw Exception('Places insuffisantes pour cette mise à jour.');
+          if (usesOccurrences && tripDepartureDate.isNotEmpty) {
+            final DocumentReference<Map<String, dynamic>> occRef =
+                _occurrenceRef(tripRef, tripDepartureDate);
+            final DocumentSnapshot<Map<String, dynamic>> occSnap =
+                await transaction.get(occRef);
+            if (occSnap.exists && occSnap.data() != null) {
+              final int currentRemaining = _toInt(occSnap.data()!['remainingSeats'], 0);
+              final int capacity = _toInt(occSnap.data()!['capacity'], 0);
+              final int nextRemaining = _computeAvailableSeatsAfterStatusTransition(
+                availableSeats: currentRemaining,
+                requestedSeats: booking.requestedSeats,
+                previousStatus: previousStatus,
+                nextStatus: normalizedStatus,
+              ).clamp(0, capacity);
+              transaction.set(
+                occRef,
+                <String, dynamic>{
+                  'remainingSeats': nextRemaining,
+                  'bookedSeats': capacity - nextRemaining,
+                  'status': nextRemaining > 0 ? 'active' : 'full',
+                  'updatedAt': FieldValue.serverTimestamp(),
+                },
+                SetOptions(merge: true),
+              );
             }
-            transaction.set(
-              tripRef,
-              <String, dynamic>{
-                'seats': nextSeats,
-                'updatedAt': FieldValue.serverTimestamp(),
-              },
-              SetOptions(merge: true),
+          } else if (!usesOccurrences) {
+            final int availableSeats = _toInt(tripSnapshot.data()!['seats'], 0);
+            final int nextSeats = _computeAvailableSeatsAfterStatusTransition(
+              availableSeats: availableSeats,
+              requestedSeats: booking.requestedSeats,
+              previousStatus: previousStatus,
+              nextStatus: normalizedStatus,
             );
+
+            if (nextSeats != availableSeats) {
+              if (nextSeats < 0) {
+                throw Exception('Places insuffisantes pour cette mise à jour.');
+              }
+              transaction.set(
+                tripRef,
+                <String, dynamic>{
+                  'seats': nextSeats,
+                  'updatedAt': FieldValue.serverTimestamp(),
+                },
+                SetOptions(merge: true),
+              );
+            }
           }
         }
       }
@@ -358,22 +426,49 @@ class VoyageBookingService {
         return;
       }
 
-      final int availableSeats = _toInt(tripSnap.data()!['seats'], 0);
-      final int nextSeats = _computeAvailableSeatsAfterStatusTransition(
-        availableSeats: availableSeats,
-        requestedSeats: requestedSeats,
-        previousStatus: status,
-        nextStatus: 'cancelled',
-      );
-      if (nextSeats != availableSeats) {
-        transaction.set(
-          tripRef,
-          <String, dynamic>{
-            'seats': nextSeats,
-            'updatedAt': FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
+      final String tripFrequency =
+          _normalizedTripFrequency(_toStringSafe(booking['tripFrequency']));
+      final String tripDepartureDate = _toStringSafe(booking['tripDepartureDate']);
+      final bool usesOccurrences = tripFrequency != 'none';
+
+      if (usesOccurrences && tripDepartureDate.isNotEmpty) {
+        final DocumentReference<Map<String, dynamic>> occRef =
+            _occurrenceRef(tripRef, tripDepartureDate);
+        final DocumentSnapshot<Map<String, dynamic>> occSnap =
+            await transaction.get(occRef);
+        if (occSnap.exists && occSnap.data() != null) {
+          final int currentRemaining = _toInt(occSnap.data()!['remainingSeats'], 0);
+          final int capacity = _toInt(occSnap.data()!['capacity'], 0);
+          final int nextRemaining = (currentRemaining + requestedSeats).clamp(0, capacity);
+          transaction.set(
+            occRef,
+            <String, dynamic>{
+              'remainingSeats': nextRemaining,
+              'bookedSeats': capacity - nextRemaining,
+              'status': nextRemaining > 0 ? 'active' : 'full',
+              'updatedAt': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true),
+          );
+        }
+      } else if (!usesOccurrences) {
+        final int availableSeats = _toInt(tripSnap.data()!['seats'], 0);
+        final int nextSeats = _computeAvailableSeatsAfterStatusTransition(
+          availableSeats: availableSeats,
+          requestedSeats: requestedSeats,
+          previousStatus: status,
+          nextStatus: 'cancelled',
         );
+        if (nextSeats != availableSeats) {
+          transaction.set(
+            tripRef,
+            <String, dynamic>{
+              'seats': nextSeats,
+              'updatedAt': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true),
+          );
+        }
       }
     });
 
@@ -456,6 +551,45 @@ class VoyageBookingService {
         },
       ),
     );
+  }
+
+  String _normalizedTripFrequency(String raw) {
+    switch (raw.trim().toLowerCase()) {
+      case 'daily':
+        return 'daily';
+      case 'weekly':
+        return 'weekly';
+      case 'monthly':
+        return 'monthly';
+      default:
+        return 'none';
+    }
+  }
+
+  String _resolveEffectiveDepartureDate(
+      CreateVoyageBookingInput input, Map<String, dynamic> trip) {
+    final String inputDate = (input.effectiveDepartureDate ?? '').trim();
+    if (inputDate.isNotEmpty) return inputDate;
+    return _toStringSafe(trip['departureDate']);
+  }
+
+  Future<int> _readAvailableSeatsForOccurrence({
+    required Transaction transaction,
+    required DocumentReference<Map<String, dynamic>> tripRef,
+    required String effectiveDepartureDate,
+    required int baseCapacity,
+  }) async {
+    final DocumentSnapshot<Map<String, dynamic>> snap =
+        await transaction.get(_occurrenceRef(tripRef, effectiveDepartureDate));
+    if (!snap.exists || snap.data() == null) return baseCapacity;
+    return _toInt(snap.data()!['remainingSeats'], baseCapacity);
+  }
+
+  DocumentReference<Map<String, dynamic>> _occurrenceRef(
+    DocumentReference<Map<String, dynamic>> tripRef,
+    String effectiveDepartureDate,
+  ) {
+    return tripRef.collection('occurrences').doc(effectiveDepartureDate);
   }
 
   String _toStringSafe(Object? value) => value is String ? value.trim() : '';
@@ -554,14 +688,22 @@ String? validateCreateVoyageBookingInput(CreateVoyageBookingInput input) {
 String? validateVoyageTripForBooking({
   required Map<String, dynamic> trip,
   required int requestedSeats,
+  String? effectiveDepartureDate,
 }) {
   final String status = (trip['status'] as String? ?? '').trim();
   if (status != 'published') {
     return 'Trajet non disponible \u00E0 la r\u00E9servation.';
   }
-  final int availableSeats = _toIntStatic(trip['seats'], 0);
-  if (availableSeats < requestedSeats) {
-    return 'Places insuffisantes.';
+  // For frequent trips the authoritative seat count comes from the occurrence
+  // subcollection and is checked after this validation in createBooking.
+  // For ponctual trips, trip['seats'] is the definitive count.
+  final String freq = (trip['tripFrequency'] as String? ?? '').trim().toLowerCase();
+  final bool isFrequent = freq == 'daily' || freq == 'weekly' || freq == 'monthly';
+  if (!isFrequent) {
+    final int availableSeats = _toIntStatic(trip['seats'], 0);
+    if (availableSeats < requestedSeats) {
+      return 'Places insuffisantes.';
+    }
   }
   return null;
 }
@@ -592,6 +734,7 @@ String buildVoyageBookingDuplicateKey(CreateVoyageBookingInput input) {
     input.segmentFrom.trim().toLowerCase(),
     input.segmentTo.trim().toLowerCase(),
     input.segmentPrice,
+    (input.effectiveDepartureDate ?? '').trim(),
     travelersKey,
   ].join('##');
 }
