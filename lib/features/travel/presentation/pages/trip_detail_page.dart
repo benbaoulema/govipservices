@@ -3579,7 +3579,6 @@ class _HomeAddressSheetState extends State<_HomeAddressSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.75,
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -3587,20 +3586,20 @@ class _HomeAddressSheetState extends State<_HomeAddressSheet> {
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: SafeArea(
         top: false,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Handle
-            Center(
-              child: Container(
-                width: 40, height: 4,
-                margin: const EdgeInsets.only(top: 12, bottom: 16),
-                decoration: BoxDecoration(color: const Color(0xFFD1D9E6), borderRadius: BorderRadius.circular(99)),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(color: const Color(0xFFD1D9E6), borderRadius: BorderRadius.circular(99)),
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-              child: Row(
+              Row(
                 children: [
                   Container(
                     width: 38, height: 38,
@@ -3619,11 +3618,8 @@ class _HomeAddressSheetState extends State<_HomeAddressSheet> {
                   ),
                 ],
               ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                child: Column(
+              const SizedBox(height: 16),
+              Column(
                   children: [
                     AddressAutocompleteField(
                       controller: _controller,
@@ -3670,11 +3666,10 @@ class _HomeAddressSheetState extends State<_HomeAddressSheet> {
                     ),
                   ],
                 ),
-              ),
-            ),
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 }
