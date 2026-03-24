@@ -13,6 +13,7 @@ import 'package:govipservices/features/travel/domain/models/voyage_booking_model
 import 'package:govipservices/features/travel/domain/repositories/trip_detail_repository.dart';
 import 'package:govipservices/features/travel/domain/usecases/trip_detail_usecases.dart';
 import 'package:govipservices/features/travel/presentation/pages/edit_trip_page.dart';
+import 'package:govipservices/features/travel/presentation/pages/voyage_ticket_page.dart';
 import 'package:govipservices/features/travel/presentation/state/trip_detail_cubit.dart';
 import 'package:govipservices/features/travel/presentation/state/trip_detail_state.dart';
 
@@ -601,91 +602,12 @@ class _SuccessBodyState extends State<_SuccessBody> {
     required VoyageBookingDocument booking,
     required int passengerCount,
   }) async {
-    await showDialog<void>(
-      context: context,
-      useRootNavigator: true,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: const BoxDecoration(
-                  color: _travelAccentSoft,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.check_circle_rounded,
-                  color: _travelAccentDark,
-                  size: 42,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Réservation confirmée',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Votre demande pour $passengerCount passager(s) a été envoyée avec succès.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: _travelAccentSoft,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  children: [
-                    const Text(
-                      'Numéro de réservation',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF5B647A),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      booking.trackNum,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
-                        color: _travelAccentDark,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () {
-                  Navigator.of(dialogContext, rootNavigator: true).pop();
-                  Navigator.of(context, rootNavigator: true)
-                      .pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
-                },
-                child: const Text('OK'),
-              ),
-            ),
-          ],
-        );
-      },
+    if (!context.mounted) return;
+    await Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => VoyageTicketPage(booking: booking),
+      ),
     );
   }
 
