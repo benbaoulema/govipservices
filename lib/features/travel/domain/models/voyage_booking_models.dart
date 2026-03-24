@@ -37,6 +37,7 @@ class CreateVoyageBookingInput {
     this.requesterEmail,
     this.idempotencyKey,
     this.effectiveDepartureDate,
+    this.comfortOptions = const <String>[],
   });
 
   final String tripId;
@@ -48,6 +49,7 @@ class CreateVoyageBookingInput {
   final String? requesterEmail;
   final String? idempotencyKey;
   final String? effectiveDepartureDate;
+  final List<String> comfortOptions;
   final String segmentFrom;
   final String segmentTo;
   final int segmentPrice;
@@ -87,6 +89,7 @@ class VoyageBookingDocument {
     required this.unreadForDriver,
     required this.unreadForPassenger,
     required this.status,
+    this.comfortOptions = const <String>[],
     this.createdAt,
     this.updatedAt,
   });
@@ -122,6 +125,7 @@ class VoyageBookingDocument {
   final int unreadForDriver;
   final int unreadForPassenger;
   final String status;
+  final List<String> comfortOptions;
   final Timestamp? createdAt;
   final Timestamp? updatedAt;
 
@@ -157,6 +161,7 @@ class VoyageBookingDocument {
       'unreadForDriver': unreadForDriver,
       'unreadForPassenger': unreadForPassenger,
       'status': status,
+      'comfortOptions': comfortOptions,
       'createdAt': createdAt,
       'updatedAt': updatedAt,
     };
@@ -202,6 +207,9 @@ class VoyageBookingDocument {
       unreadForDriver: (map['unreadForDriver'] as num? ?? 0).toInt(),
       unreadForPassenger: (map['unreadForPassenger'] as num? ?? 0).toInt(),
       status: (map['status'] as String? ?? 'pending').trim(),
+      comfortOptions: (map['comfortOptions'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<String>()
+          .toList(growable: false),
       createdAt: map['createdAt'] as Timestamp?,
       updatedAt: map['updatedAt'] as Timestamp?,
     );

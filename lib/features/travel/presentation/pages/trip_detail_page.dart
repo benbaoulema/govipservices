@@ -1252,6 +1252,18 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
       growable: false,
     );
 
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    // Show comfort options sheet before submitting
+    final List<String>? selectedOptions = await showModalBottomSheet<List<String>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _ConfortOptionsSheet(),
+    );
+    // null means dismissed without confirming
+    if (selectedOptions == null || !mounted) return;
+
     setState(() {
       _errorText = null;
       _isSubmitting = true;
@@ -1269,6 +1281,7 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
           requesterEmail: widget.authUser?.email,
           idempotencyKey: _submissionKey,
           effectiveDepartureDate: widget.displayDate,
+          comfortOptions: selectedOptions,
           segmentFrom: widget.segment.departureNode.address,
           segmentTo: widget.segment.arrivalNode.address,
           segmentPrice: widget.segment.segmentPrice,
@@ -1276,7 +1289,6 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
         ),
       );
       if (!mounted) return;
-      FocusManager.instance.primaryFocus?.unfocus();
       Navigator.of(context).pop(booking);
     } catch (error) {
       if (!mounted) return;
@@ -3307,6 +3319,134 @@ class _SkeletonBox extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFE8EDF8),
         borderRadius: BorderRadius.circular(16),
+      ),
+    );
+  }
+}
+
+// ── Comfort Options Sheet ──────────────────────────────────────────────────
+
+class _ConfortOption {
+  const _ConfortOption({required this.id, required this.label, required this.icon, this.price});
+  final String id;
+  final String label;
+  final IconData icon;
+  final int? price;
+}
+
+const List<_ConfortOption> _kConfortOptions = <_ConfortOption>[
+  _ConfortOption(id: 'depot_gare',  label: 'Me déposer à la gare',      icon: Icons.directions_car_rounded),
+  _ConfortOption(id: 'gare_maison', label: 'De la gare à la maison',    icon: Icons.home_rounded),
+  _ConfortOption(id: 'smart_food',  label: 'Smart food (eau + sandwich)', icon: Icons.lunch_dining_rounded, price: 500),
+];
+
+class _ConfortOptionsSheet extends StatefulWidget {
+  const _ConfortOptionsSheet();
+
+  @override
+  State<_ConfortOptionsSheet> createState() => _ConfortOptionsSheetState();
+}
+
+class _ConfortOptionsSheetState extends State<_ConfortOptionsSheet> {
+  final Set<String> _selected = <String>{};
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + MediaQuery.paddingOf(context).bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFFD1D9E6), borderRadius: BorderRadius.circular(99))),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(color: _travelAccentSoft, borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.stars_rounded, color: _travelAccentDark, size: 22),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Services Confort', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF10233E))),
+                    Text('Optionnels · Sélectionnez ce dont vous avez besoin', style: TextStyle(fontSize: 12, color: Color(0xFF7A8CA8))),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ...List.generate(_kConfortOptions.length, (i) {
+            final _ConfortOption opt = _kConfortOptions[i];
+            final bool selected = _selected.contains(opt.id);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: GestureDetector(
+                onTap: () => setState(() {
+                  if (selected) _selected.remove(opt.id); else _selected.add(opt.id);
+                }),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: selected ? _travelAccentSoft : const Color(0xFFF8FAFB),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: selected ? _travelAccentDark : const Color(0xFFE2E8F0), width: selected ? 1.5 : 1),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 36, height: 36,
+                        decoration: BoxDecoration(
+                          color: selected ? _travelAccentDark : const Color(0xFFE8EDF5),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(opt.icon, size: 18, color: selected ? Colors.white : const Color(0xFF5B647A)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(opt.label, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: selected ? _travelAccentDark : const Color(0xFF10233E))),
+                            if (opt.price != null)
+                              Text('${opt.price} XOF', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? _travelAccentDark : const Color(0xFF7A8CA8))),
+                          ],
+                        ),
+                      ),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        child: selected
+                            ? const Icon(Icons.check_circle_rounded, color: _travelAccentDark, key: ValueKey('checked'))
+                            : const Icon(Icons.radio_button_unchecked_rounded, color: Color(0xFFD1D9E6), key: ValueKey('unchecked')),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 6),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: _travelAccentDark,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              onPressed: () => Navigator.of(context).pop(_selected.toList()),
+              child: Text(_selected.isEmpty ? 'Continuer sans option' : 'Continuer (${_selected.length} option${_selected.length > 1 ? "s" : ""})'),
+            ),
+          ),
+        ],
       ),
     );
   }

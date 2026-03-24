@@ -100,6 +100,7 @@ class VoyageBookingService {
         'segmentPrice': input.segmentPrice,
         'totalPrice': totalPrice,
         'travelers': input.travelers.map((t) => t.toMap()).toList(growable: false),
+        'comfortOptions': input.comfortOptions,
         'unreadForDriver': 0,
         'unreadForPassenger': 0,
         'status': 'pending',

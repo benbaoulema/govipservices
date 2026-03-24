@@ -455,6 +455,15 @@ class VoyageTicketPage extends StatelessWidget {
   }
 }
 
+String _comfortOptionLabel(String id) {
+  switch (id) {
+    case 'depot_gare':  return 'Dépôt à la gare';
+    case 'gare_maison': return 'Gare → Maison';
+    case 'smart_food':  return 'Smart food (500 XOF)';
+    default:            return id;
+  }
+}
+
 // ── Ticket Widget (UI Flutter) ─────────────────────────────────────────────
 
 class _TicketCard extends StatelessWidget {
@@ -705,6 +714,34 @@ class _TicketCard extends StatelessWidget {
                   ],
                 ),
 
+                if (booking.comfortOptions.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _SectionTitle(icon: Icons.stars_rounded, label: 'Services Confort'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: booking.comfortOptions.map((id) {
+                      final String label = _comfortOptionLabel(id);
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _travelAccentSoft,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: _travelAccentDark.withValues(alpha: 0.25)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.check_circle_rounded, size: 13, color: _travelAccentDark),
+                            const SizedBox(width: 5),
+                            Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _travelAccentDark)),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
                 if (booking.totalPrice > 0) ...[
                   const SizedBox(height: 16),
                   Container(
