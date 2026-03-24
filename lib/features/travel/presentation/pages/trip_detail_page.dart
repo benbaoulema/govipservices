@@ -16,6 +16,9 @@ import 'package:govipservices/features/travel/presentation/pages/edit_trip_page.
 import 'package:govipservices/features/travel/presentation/pages/voyage_ticket_page.dart';
 import 'package:govipservices/features/travel/presentation/state/trip_detail_cubit.dart';
 import 'package:govipservices/features/travel/presentation/state/trip_detail_state.dart';
+import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
+import 'package:govipservices/app/config/runtime_app_config.dart';
+import 'package:govipservices/shared/services/location_service.dart';
 
 const Color _travelAccent = Color(0xFF14B8A6);
 const Color _travelAccentDark = Color(0xFF0F766E);
@@ -3349,6 +3352,49 @@ class _ConfortOptionsSheet extends StatefulWidget {
 
 class _ConfortOptionsSheetState extends State<_ConfortOptionsSheet> {
   final Set<String> _selected = <String>{};
+  // stores home address when gare_maison is selected
+  String? _homeAddress;
+
+  Future<void> _handleOptionTap(_ConfortOption opt) async {
+    final bool wasSelected = _selected.contains(opt.id);
+    if (opt.id == 'gare_maison') {
+      if (wasSelected) {
+        // deselect and clear address
+        setState(() {
+          _selected.remove(opt.id);
+          _homeAddress = null;
+        });
+      } else {
+        // open address sheet first
+        final String? address = await showModalBottomSheet<String>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (_) => const _HomeAddressSheet(),
+        );
+        if (!mounted) return;
+        if (address != null && address.trim().isNotEmpty) {
+          setState(() {
+            _selected.add(opt.id);
+            _homeAddress = address.trim();
+          });
+        }
+      }
+    } else {
+      setState(() {
+        if (wasSelected) { _selected.remove(opt.id); } else { _selected.add(opt.id); }
+      });
+    }
+  }
+
+  List<String> _buildResult() {
+    return _selected.map((id) {
+      if (id == 'gare_maison' && _homeAddress != null) {
+        return 'gare_maison:$_homeAddress';
+      }
+      return id;
+    }).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3386,47 +3432,82 @@ class _ConfortOptionsSheetState extends State<_ConfortOptionsSheet> {
           ...List.generate(_kConfortOptions.length, (i) {
             final _ConfortOption opt = _kConfortOptions[i];
             final bool selected = _selected.contains(opt.id);
+            final bool isGareMaison = opt.id == 'gare_maison';
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: GestureDetector(
-                onTap: () => setState(() {
-                  if (selected) _selected.remove(opt.id); else _selected.add(opt.id);
-                }),
+                onTap: () => _handleOptionTap(opt),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
                     color: selected ? _travelAccentSoft : const Color(0xFFF8FAFB),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: selected ? _travelAccentDark : const Color(0xFFE2E8F0), width: selected ? 1.5 : 1),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        width: 36, height: 36,
-                        decoration: BoxDecoration(
-                          color: selected ? _travelAccentDark : const Color(0xFFE8EDF5),
-                          borderRadius: BorderRadius.circular(10),
+                      Row(
+                        children: [
+                          Container(
+                            width: 36, height: 36,
+                            decoration: BoxDecoration(
+                              color: selected ? _travelAccentDark : const Color(0xFFE8EDF5),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(opt.icon, size: 18, color: selected ? Colors.white : const Color(0xFF5B647A)),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(opt.label, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: selected ? _travelAccentDark : const Color(0xFF10233E))),
+                                if (opt.price != null)
+                                  Text('${opt.price} XOF', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? _travelAccentDark : const Color(0xFF7A8CA8)))
+                                else if (!selected && isGareMaison)
+                                  const Text('Adresse requise', style: TextStyle(fontSize: 11, color: Color(0xFF9AA5B4))),
+                              ],
+                            ),
+                          ),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 180),
+                            child: selected
+                                ? const Icon(Icons.check_circle_rounded, color: _travelAccentDark, key: ValueKey('checked'))
+                                : const Icon(Icons.radio_button_unchecked_rounded, color: Color(0xFFD1D9E6), key: ValueKey('unchecked')),
+                          ),
+                        ],
+                      ),
+                      // address display
+                      if (isGareMaison && selected && _homeAddress != null) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: _travelAccentDark.withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.location_on_rounded, size: 14, color: _travelAccentDark),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  _homeAddress!,
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF10233E)),
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () => _handleOptionTap(opt),
+                                child: const Icon(Icons.edit_rounded, size: 14, color: Color(0xFF7A8CA8)),
+                              ),
+                            ],
+                          ),
                         ),
-                        child: Icon(opt.icon, size: 18, color: selected ? Colors.white : const Color(0xFF5B647A)),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(opt.label, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: selected ? _travelAccentDark : const Color(0xFF10233E))),
-                            if (opt.price != null)
-                              Text('${opt.price} XOF', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? _travelAccentDark : const Color(0xFF7A8CA8))),
-                          ],
-                        ),
-                      ),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        child: selected
-                            ? const Icon(Icons.check_circle_rounded, color: _travelAccentDark, key: ValueKey('checked'))
-                            : const Icon(Icons.radio_button_unchecked_rounded, color: Color(0xFFD1D9E6), key: ValueKey('unchecked')),
-                      ),
+                      ],
                     ],
                   ),
                 ),
@@ -3442,11 +3523,157 @@ class _ConfortOptionsSheetState extends State<_ConfortOptionsSheet> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
-              onPressed: () => Navigator.of(context).pop(_selected.toList()),
+              onPressed: () => Navigator.of(context).pop(_buildResult()),
               child: Text(_selected.isEmpty ? 'Continuer sans option' : 'Continuer (${_selected.length} option${_selected.length > 1 ? "s" : ""})'),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Home Address Sheet ─────────────────────────────────────────────────────
+
+class _HomeAddressSheet extends StatefulWidget {
+  const _HomeAddressSheet();
+
+  @override
+  State<_HomeAddressSheet> createState() => _HomeAddressSheetState();
+}
+
+class _HomeAddressSheetState extends State<_HomeAddressSheet> {
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _focus = FocusNode();
+  bool _fetchingGps = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _useGps() async {
+    setState(() => _fetchingGps = true);
+    try {
+      final LocationResult? result = await LocationService.instance.getCurrent();
+      if (!mounted) return;
+      if (result != null && result.address.isNotEmpty) {
+        _controller.text = result.address;
+        Navigator.of(context).pop(result.address);
+      }
+    } finally {
+      if (mounted) setState(() => _fetchingGps = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.75,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Handle
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                margin: const EdgeInsets.only(top: 12, bottom: 16),
+                decoration: BoxDecoration(color: const Color(0xFFD1D9E6), borderRadius: BorderRadius.circular(99)),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 38, height: 38,
+                    decoration: BoxDecoration(color: _travelAccentSoft, borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.home_rounded, color: _travelAccentDark, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Adresse de la maison', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Color(0xFF10233E))),
+                        Text('Où souhaitez-vous être déposé ?', style: TextStyle(fontSize: 12, color: Color(0xFF7A8CA8))),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                child: Column(
+                  children: [
+                    AddressAutocompleteField(
+                      controller: _controller,
+                      focusNode: _focus,
+                      labelText: 'Adresse',
+                      hintText: 'Ex: Rue de la Paix, Quartier...',
+                      apiKey: RuntimeAppConfig.googleMapsApiKey,
+                      onChanged: (_) {},
+                      onSuggestionSelected: (address) {
+                        Navigator.of(context).pop(address);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _travelAccentDark,
+                          side: const BorderSide(color: _travelSurfaceBorder),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: _fetchingGps ? null : _useGps,
+                        icon: _fetchingGps
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.my_location_rounded, size: 18),
+                        label: Text(_fetchingGps ? 'Localisation...' : 'Utiliser ma position actuelle'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _travelAccentDark,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: _controller.text.trim().isEmpty
+                            ? null
+                            : () => Navigator.of(context).pop(_controller.text.trim()),
+                        child: const Text('Valider cette adresse'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

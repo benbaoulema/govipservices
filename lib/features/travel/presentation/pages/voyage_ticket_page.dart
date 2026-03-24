@@ -456,6 +456,10 @@ class VoyageTicketPage extends StatelessWidget {
 }
 
 String _comfortOptionLabel(String id) {
+  if (id.startsWith('gare_maison:')) {
+    final String address = id.substring('gare_maison:'.length);
+    return 'Gare → $address';
+  }
   switch (id) {
     case 'depot_gare':  return 'Dépôt à la gare';
     case 'gare_maison': return 'Gare → Maison';
