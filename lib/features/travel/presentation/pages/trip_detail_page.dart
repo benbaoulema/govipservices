@@ -3525,12 +3525,13 @@ class _ConfortOptionsSheetState extends State<_ConfortOptionsSheet> {
             width: double.infinity,
             child: FilledButton(
               style: FilledButton.styleFrom(
-                backgroundColor: _travelAccentDark,
+                backgroundColor: _travelAccent,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
               onPressed: () => Navigator.of(context).pop(_buildResult()),
-              child: Text(_selected.isEmpty ? 'Continuer sans option' : 'Continuer (${_selected.length} option${_selected.length > 1 ? "s" : ""})'),
+              child: Text(_selected.isEmpty ? 'Réserver sans option' : 'Réserver (${_selected.length} option${_selected.length > 1 ? "s" : ""})'),
             ),
           ),
         ],
