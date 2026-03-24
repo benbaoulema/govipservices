@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:govipservices/features/travel/data/voyage_booking_service.dart';
 import 'package:govipservices/features/travel/domain/models/voyage_booking_models.dart';
+import 'package:govipservices/features/travel/presentation/pages/voyage_ticket_page.dart';
 import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
 class BookingDetailPage extends StatefulWidget {
@@ -25,6 +26,14 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
   void initState() {
     super.initState();
     _booking = widget.booking;
+  }
+
+  void _openTicket() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => VoyageTicketPage(booking: _booking),
+      ),
+    );
   }
 
   bool get _canCancel {
@@ -98,24 +107,49 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
       appBar: AppBar(
         leading: const HomeAppBarButton(),
         title: const Text('Réservation'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.confirmation_num_rounded),
+            tooltip: 'Voir le billet',
+            onPressed: _openTicket,
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: FilledButton.icon(
-            onPressed: _canCancel && !_isCancelling ? _cancelBooking : null,
-            icon: _isCancelling
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.cancel_outlined),
-            label: Text(_canCancel ? 'Annuler la réservation' : 'Réservation non annulable'),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _openTicket,
+                  icon: const Icon(Icons.confirmation_num_rounded),
+                  label: const Text('Voir le billet / Télécharger PDF'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _canCancel && !_isCancelling ? _cancelBooking : null,
+                  icon: _isCancelling
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.cancel_outlined),
+                  label: Text(_canCancel ? 'Annuler la réservation' : 'Réservation non annulable'),
+                ),
+              ),
+            ],
           ),
         ),
       ),
