@@ -3813,7 +3813,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                 label: 'Wave',
                 subtitle: 'Paiement mobile Wave',
                 color: const Color(0xFF1A56DB),
-                icon: Icons.waves_rounded,
+                imagePath: 'assets/wave.jpg',
                 selected: _method == _PaymentMethod.wave,
                 onTap: () => setState(() => _method = _PaymentMethod.wave),
               ),
@@ -3822,6 +3822,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                 label: 'Orange Money',
                 subtitle: 'Paiement mobile Orange',
                 color: const Color(0xFFFF6600),
+                imagePath: 'assets/om.png',
                 icon: Icons.account_balance_wallet_rounded,
                 selected: _method == _PaymentMethod.orangeMoney,
                 onTap: () => setState(() => _method = _PaymentMethod.orangeMoney),
@@ -3877,17 +3878,19 @@ class _PaymentMethodTile extends StatelessWidget {
     required this.label,
     required this.subtitle,
     required this.color,
-    required this.icon,
     required this.selected,
     required this.onTap,
+    this.imagePath,
+    this.icon,
   });
 
   final String label;
   final String subtitle;
   final Color color;
-  final IconData icon;
   final bool selected;
   final VoidCallback onTap;
+  final String? imagePath;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
@@ -3906,13 +3909,29 @@ class _PaymentMethodTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Container(
-              width: 40, height: 40,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: color, size: 22),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: imagePath != null
+                  ? Image.asset(
+                      imagePath!,
+                      width: 40, height: 40, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(icon ?? Icons.payment_rounded, color: color, size: 22),
+                      ),
+                    )
+                  : Container(
+                      width: 40, height: 40,
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(icon ?? Icons.payment_rounded, color: color, size: 22),
+                    ),
             ),
             const SizedBox(width: 12),
             Expanded(
