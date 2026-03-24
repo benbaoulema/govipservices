@@ -3634,8 +3634,8 @@ class _HomeAddressSheetState extends State<_HomeAddressSheet> {
                       hintText: 'Ex: Rue de la Paix, Quartier...',
                       apiKey: RuntimeAppConfig.googleMapsApiKey,
                       onChanged: (_) {},
-                      onSuggestionSelected: (address) {
-                        Navigator.of(context).pop(address);
+                      onSuggestionSelected: (suggestion) {
+                        Navigator.of(context).pop(suggestion.description);
                       },
                     ),
                     const SizedBox(height: 12),
