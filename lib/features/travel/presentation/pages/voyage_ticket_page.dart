@@ -782,7 +782,13 @@ class _TicketCard extends StatelessWidget {
                           children: [
                             const Icon(Icons.check_circle_rounded, size: 13, color: _travelAccentDark),
                             const SizedBox(width: 5),
-                            Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _travelAccentDark)),
+                            Flexible(
+                              child: Text(
+                                label,
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _travelAccentDark),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                           ],
                         ),
                       );
