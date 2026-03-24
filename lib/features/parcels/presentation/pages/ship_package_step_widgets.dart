@@ -150,6 +150,7 @@ class _WaitingInlineContent extends StatefulWidget {
     this.onCancel,
     this.onTimeout,
     this.etaText,
+    this.overridePrice,
   });
 
   final ParcelServiceMatch match;
@@ -160,6 +161,7 @@ class _WaitingInlineContent extends StatefulWidget {
   final VoidCallback? onTimeout;
   final ScrollController scrollController;
   final String? etaText;
+  final double? overridePrice;
 
   @override
   State<_WaitingInlineContent> createState() => _WaitingInlineContentState();
@@ -224,6 +226,7 @@ class _WaitingInlineContentState extends State<_WaitingInlineContent>
             match: widget.match,
             trackNum: widget.trackNum,
             etaText: widget.etaText,
+            overridePrice: widget.overridePrice,
           ),
           const SizedBox(height: 20),
           ...List<Widget>.generate(_kStatusSteps.length, (int i) {
@@ -444,10 +447,12 @@ class _DriverCard extends StatelessWidget {
     required this.match,
     required this.trackNum,
     this.etaText,
+    this.overridePrice,
   });
   final ParcelServiceMatch match;
   final String trackNum;
   final String? etaText;
+  final double? overridePrice;
 
   @override
   Widget build(BuildContext context) {
@@ -521,7 +526,7 @@ class _DriverCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  '${match.price.toStringAsFixed(0)} ${match.currency}',
+                  '${(overridePrice ?? match.price).toStringAsFixed(0)} ${match.currency}',
                   style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w800,

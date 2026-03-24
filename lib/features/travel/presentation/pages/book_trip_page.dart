@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/app/router/app_routes.dart';
-import 'package:geocoding/geocoding.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:govipservices/features/travel/data/transport_company_repository.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
+import 'package:govipservices/features/travel/data/trip_search_service.dart' show normalize;
+import 'package:govipservices/features/travel/domain/models/transport_company.dart';
 import 'package:govipservices/features/travel/domain/models/trip_detail_models.dart';
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
-import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
+import 'package:govipservices/shared/services/location_service.dart';
 
 enum _BookingDateChoice { today, tomorrow, custom }
 
@@ -29,18 +30,19 @@ class _BookTripPageState extends State<BookTripPage> {
   String get _googleMapsApiKey => RuntimeAppConfig.googleMapsApiKey;
 
   final TravelRepository _travelRepository = TravelRepository();
+  final TransportCompanyRepository _companyRepo = TransportCompanyRepository();
+
+  List<TransportCompany> _companies = const <TransportCompany>[];
+  Set<String> _selectedCompanyIds = const <String>{};
+
   final TextEditingController _departureController = TextEditingController();
   final TextEditingController _arrivalController = TextEditingController();
-  final FocusNode _departureFocusNode = FocusNode();
-  final FocusNode _arrivalFocusNode = FocusNode();
   final PageController _pageController = PageController();
 
   int _currentStep = 0;
+  bool _isAutoAdvancingToArrival = false;
   bool _isFetchingLocation = false;
   bool _isSearchingTrips = false;
-  bool _isAutoAdvancingToArrival = false;
-  String? _cachedCurrentLocationAddress;
-  Future<void>? _locationWarmupFuture;
   _BookingDateChoice _dateChoice = _BookingDateChoice.today;
   DateTime? _customDate;
   List<TripSearchResult> _lastResults = const <TripSearchResult>[];
@@ -48,17 +50,47 @@ class _BookTripPageState extends State<BookTripPage> {
   @override
   void initState() {
     super.initState();
-    _locationWarmupFuture = _warmupCurrentLocationAddress();
+    _loadCompanies();
+    _prefillDepartureIfReady();
+  }
+
+  void _prefillDepartureIfReady() {
+    final String? cached = LocationService.instance.cachedAddress;
+    if (cached != null && _departureController.text.isEmpty) {
+      _departureController.text = cached;
+    }
+  }
+
+
+  Future<void> _loadCompanies() async {
+    try {
+      final List<TransportCompany> list = await _companyRepo.fetchEnabled();
+      if (!mounted) return;
+      setState(() {
+        _companies = list;
+      });
+      debugPrint('[BookTrip] ${list.length} compagnies chargées: ${list.map((c) => c.name).join(', ')}');
+    } catch (e) {
+      debugPrint('[BookTrip] Erreur chargement compagnies: $e');
+    }
   }
 
   @override
   void dispose() {
     _departureController.dispose();
     _arrivalController.dispose();
-    _departureFocusNode.dispose();
-    _arrivalFocusNode.dispose();
     _pageController.dispose();
     super.dispose();
+  }
+
+  Future<void> _goToStep(int step) async {
+    await _pageController.animateToPage(
+      step,
+      duration: const Duration(milliseconds: 520),
+      curve: Curves.easeInOutCubicEmphasized,
+    );
+    if (!mounted) return;
+    setState(() => _currentStep = step);
   }
 
   DateTime get _selectedDate {
@@ -71,48 +103,6 @@ class _BookTripPageState extends State<BookTripPage> {
       return today.add(const Duration(days: 1));
     }
     return _customDate ?? today;
-  }
-
-  Future<void> _goToStep(int step) async {
-    _departureFocusNode.unfocus();
-    _arrivalFocusNode.unfocus();
-    await _pageController.animateToPage(
-      step,
-      duration: const Duration(milliseconds: 520),
-      curve: Curves.easeInOutCubicEmphasized,
-    );
-    if (!mounted) return;
-    setState(() {
-      _currentStep = step;
-    });
-    if (step == 1) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _arrivalFocusNode.requestFocus();
-      });
-    }
-  }
-
-  void _handleDepartureChanged(String _) {
-    setState(() {});
-  }
-
-  Future<void> _handleDepartureConfirmed() async {
-    final bool isDepartureValid = _departureController.text.trim().length >= 3;
-    if (!isDepartureValid || _currentStep != 0) return;
-    await _autoAdvanceToArrival();
-  }
-
-  Future<void> _autoAdvanceToArrival() async {
-    if (_isAutoAdvancingToArrival) return;
-    _isAutoAdvancingToArrival = true;
-    try {
-      await _goToStep(1);
-      if (!mounted) return;
-      _arrivalFocusNode.requestFocus();
-    } finally {
-      _isAutoAdvancingToArrival = false;
-    }
   }
 
   void _showMessage(String message, {IconData icon = Icons.info_outline}) {
@@ -132,110 +122,32 @@ class _BookTripPageState extends State<BookTripPage> {
       );
   }
 
-  Future<void> _warmupCurrentLocationAddress() async {
-    try {
-      final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) return;
-
-      final LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-        return;
-      }
-
-      final String? resolvedAddress = await _resolveCurrentLocationAddress();
-      if (resolvedAddress == null || !mounted) return;
-      _cachedCurrentLocationAddress = resolvedAddress;
-    } catch (_) {
-      // Silent warmup: best effort only.
-    }
-  }
-
-  Future<String?> _resolveCurrentLocationAddress() async {
-    final Position position = await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-    );
-    final List<Placemark> placemarks = await placemarkFromCoordinates(
-      position.latitude,
-      position.longitude,
-    );
-
-    final Placemark? first = placemarks.isNotEmpty ? placemarks.first : null;
-    final String address = <String?>[
-      first?.street,
-      first?.subLocality,
-      first?.locality,
-      first?.country,
-    ].whereType<String>().map((part) => part.trim()).where((part) => part.isNotEmpty).join(', ');
-
-    return address.trim().isEmpty
-        ? '${position.latitude.toStringAsFixed(5)}, ${position.longitude.toStringAsFixed(5)}'
-        : address;
-  }
-
-  Future<void> _applyCurrentLocationAsDeparture(String resolvedAddress) async {
-    _departureController.text = resolvedAddress;
-    _departureController.selection = TextSelection.collapsed(offset: resolvedAddress.length);
-    _cachedCurrentLocationAddress = resolvedAddress;
-    _showMessage('D\u00E9part renseign\u00E9 depuis votre position.');
-    await _handleDepartureConfirmed();
-  }
-
   Future<void> _useCurrentLocationForDeparture() async {
     if (_isFetchingLocation) return;
-
-    setState(() {
-      _isFetchingLocation = true;
-    });
-
+    setState(() => _isFetchingLocation = true);
     try {
-      if (_cachedCurrentLocationAddress == null && _locationWarmupFuture != null) {
-        await _locationWarmupFuture;
-      }
-      if (_cachedCurrentLocationAddress != null) {
-        await _applyCurrentLocationAsDeparture(_cachedCurrentLocationAddress!);
-        return;
-      }
-
-      final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
+      final String? address = (await LocationService.instance.getCurrent())?.address;
+      if (!mounted) return;
+      if (address == null) {
         _showMessage(
-          'Activez la localisation pour utiliser votre position actuelle.',
-          icon: Icons.location_off_outlined,
-        );
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-        _showMessage(
-          'Autorisez la localisation pour pr\u00E9-remplir votre d\u00E9part.',
-          icon: Icons.lock_outline,
-        );
-        return;
-      }
-
-      final String? resolvedAddress = await _resolveCurrentLocationAddress();
-      if (resolvedAddress == null) {
-        _showMessage(
-          'Impossible de r\u00E9cup\u00E9rer votre position actuelle.',
+          'Impossible de récupérer votre position actuelle.',
           icon: Icons.error_outline,
         );
         return;
       }
-      await _applyCurrentLocationAsDeparture(resolvedAddress);
+      _departureController.text = address;
+      _departureController.selection = TextSelection.collapsed(offset: address.length);
+      _showMessage('Départ renseigné depuis votre position.');
+      setState(() {});
     } catch (_) {
+      if (!mounted) return;
       _showMessage(
-        'Impossible de r\u00E9cup\u00E9rer votre position actuelle.',
+        'Impossible de récupérer votre position actuelle.',
         icon: Icons.error_outline,
       );
     } finally {
       if (!mounted) return;
-      setState(() {
-        _isFetchingLocation = false;
-      });
+      setState(() => _isFetchingLocation = false);
     }
   }
 
@@ -266,13 +178,52 @@ class _BookTripPageState extends State<BookTripPage> {
     });
   }
 
+  Future<void> _openDepartureSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _AddressSheet(
+        title: 'Départ',
+        hint: 'Ex: Cocody, Abidjan',
+        controller: _departureController,
+        apiKey: _googleMapsApiKey,
+        onGps: _useCurrentLocationForDeparture,
+        isFetchingGps: _isFetchingLocation,
+      ),
+    );
+    if (!mounted) return;
+    setState(() {});
+    if (_departureController.text.trim().length >= 3 && _currentStep == 0) {
+      if (!_isAutoAdvancingToArrival) {
+        _isAutoAdvancingToArrival = true;
+        await _goToStep(1);
+        _isAutoAdvancingToArrival = false;
+      }
+    }
+  }
+
+  Future<void> _openArrivalSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _AddressSheet(
+        title: 'Arrivée',
+        hint: 'Ex: Plateau, Abidjan',
+        controller: _arrivalController,
+        apiKey: _googleMapsApiKey,
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
   Future<void> _submitSearch() async {
     final String departure = _departureController.text.trim();
     final String arrival = _arrivalController.text.trim();
 
     if (departure.length < 3) {
       _showMessage('Renseignez un départ valide.', icon: Icons.edit_location_alt_outlined);
-      await _goToStep(0);
       return;
     }
 
@@ -286,11 +237,18 @@ class _BookTripPageState extends State<BookTripPage> {
     });
 
     try {
-      final List<TripSearchResult> results = await _travelRepository.searchAvailableTrips(
+      List<TripSearchResult> results = await _travelRepository.searchAvailableTrips(
         departureQuery: departure,
         arrivalQuery: arrival,
         departureDate: _selectedDate,
       );
+      if (_selectedCompanyIds.isNotEmpty) {
+        final List<String> selectedNames = _companies
+            .where((c) => _selectedCompanyIds.contains(c.id))
+            .map((c) => c.name)
+            .toList();
+        results = results.where((trip) => _tripMatchesAnyCompany(trip.driverName, selectedNames)).toList();
+      }
       if (!mounted) return;
       setState(() {
         _lastResults = results;
@@ -298,7 +256,7 @@ class _BookTripPageState extends State<BookTripPage> {
       await _showSearchResultsBottomSheet(results);
     } catch (_) {
       _showMessage(
-        'Erreur lors de la recherche des trajets. V\u00E9rifiez votre connexion.',
+        'Erreur lors de la recherche des trajets. Vérifiez votre connexion.',
         icon: Icons.error_outline,
       );
     } finally {
@@ -345,7 +303,7 @@ class _BookTripPageState extends State<BookTripPage> {
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 24),
                             child: Text(
-                              'Aucun trajet trouv\u00E9 pour ce jour.\nEssayez une autre arrivée ou une autre date.',
+                              'Aucun trajet trouvé pour ce jour.\nEssayez une autre arrivée ou une autre date.',
                               textAlign: TextAlign.center,
                               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     color: const Color(0xFF5B647A),
@@ -387,10 +345,21 @@ class _BookTripPageState extends State<BookTripPage> {
     );
   }
 
+  bool _tripMatchesAnyCompany(String? driverName, List<String> companyNames) {
+    if (driverName == null || driverName.isEmpty) return false;
+    final String dn = normalize(driverName);
+    for (final String name in companyNames) {
+      final String cn = normalize(name);
+      if (cn.isEmpty) continue;
+      if (dn.contains(cn) || cn.contains(dn)) return true;
+    }
+    return false;
+  }
+
   String _labelForChoice(_BookingDateChoice choice) {
     switch (choice) {
       case _BookingDateChoice.today:
-        return 'Aujourd\'hui';
+        return "Aujourd'hui";
       case _BookingDateChoice.tomorrow:
         return 'Demain';
       case _BookingDateChoice.custom:
@@ -401,71 +370,19 @@ class _BookTripPageState extends State<BookTripPage> {
 
   String _formatSelectedDateLabel() {
     final DateTime date = _selectedDate;
-    final String day = date.day.toString().padLeft(2, '0');
-    final String month = date.month.toString().padLeft(2, '0');
-    final String year = date.year.toString();
-    return '$day/$month/$year';
-  }
-
-  Widget _animateEntrance(Widget child, {int delayMs = 0}) {
-    return child
-        .animate()
-        .fadeIn(delay: Duration(milliseconds: delayMs), duration: 300.ms)
-        .slideY(begin: 0.08, end: 0, curve: Curves.easeOutCubic);
-  }
-
-  Widget _buildAnimatedStepCard({
-    required int index,
-    required Widget child,
-  }) {
-    return AnimatedBuilder(
-      animation: _pageController,
-      child: child,
-      builder: (context, animatedChild) {
-        double page = _currentStep.toDouble();
-        if (_pageController.hasClients) {
-          page = _pageController.page ?? _pageController.initialPage.toDouble();
-        }
-        final double distance = (page - index).abs().clamp(0.0, 1.0);
-        final double scale = 1 - (0.06 * distance);
-        final double opacity = 1 - (0.35 * distance);
-        final double translateY = 18 * distance;
-
-        return Opacity(
-          opacity: opacity,
-          child: Transform.translate(
-            offset: Offset(0, translateY),
-            child: Transform.scale(
-              scale: scale,
-              alignment: Alignment.topCenter,
-              child: animatedChild,
-            ),
-          ),
-        );
-      },
-    );
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
   }
 
   @override
   Widget build(BuildContext context) {
-    final bool isKeyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
-
     return Scaffold(
       backgroundColor: _travelPageBg,
-      appBar: AppBar(
-        leading: const HomeAppBarButton(),
-        title: const Text('Réserver'),
-      ),
       body: DecoratedBox(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [
-              _travelPageBgAlt,
-              _travelPageBg,
-              Color(0xFFFFFFFF),
-            ],
+            colors: [_travelPageBgAlt, _travelPageBg, Color(0xFFFFFFFF)],
           ),
         ),
         child: SafeArea(
@@ -473,139 +390,115 @@ class _BookTripPageState extends State<BookTripPage> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: Column(
               children: [
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  child: isKeyboardVisible
-                      ? const SizedBox.shrink()
-                      : _TopHero(
-                          currentStep: _currentStep,
-                          onStepTap: (step) {
-                            _goToStep(step);
-                          },
-                        ).animate().fadeIn(duration: 320.ms).slideY(begin: 0.08, end: 0),
+                // Bouton retour
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: GestureDetector(
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(13),
+                        border: Border.all(color: _travelSurfaceBorder),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _travelAccent.withValues(alpha: 0.10),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: _travelAccentDark),
+                    ),
+                  ),
                 ),
-                SizedBox(height: isKeyboardVisible ? 6 : 14),
+                const SizedBox(height: 10),
+                // Hero
+                _TopHero(
+                  currentStep: _currentStep,
+                  onStepTap: _goToStep,
+                ).animate().fadeIn(duration: 320.ms).slideY(begin: 0.08, end: 0),
+                // Compagnies
+                if (_companies.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 12),
+                  _CompanyChipRow(
+                    companies: _companies,
+                    selectedIds: _selectedCompanyIds,
+                    onToggle: (String id) => setState(() {
+                      if (id == '__tous__') {
+                        _selectedCompanyIds = const <String>{};
+                      } else {
+                        final Set<String> next = Set<String>.from(_selectedCompanyIds);
+                        if (next.contains(id)) {
+                          next.remove(id);
+                        } else {
+                          next.add(id);
+                        }
+                        _selectedCompanyIds = next;
+                      }
+                    }),
+                  ),
+                ],
+                SizedBox(height: _companies.isNotEmpty ? 14 : 14),
+                // Step cards
                 Expanded(
                   child: PageView(
                     controller: _pageController,
                     physics: const BouncingScrollPhysics(),
-                    onPageChanged: (index) {
-                      setState(() => _currentStep = index);
-                      if (index == 1) {
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted) return;
-                          _arrivalFocusNode.requestFocus();
-                        });
-                      }
-                    },
-                    children: [
-                      _buildAnimatedStepCard(
-                        index: 0,
-                        child: _animateEntrance(
-                          _StepCard(
-                          icon: Icons.trip_origin_rounded,
-                          title: 'D\u00E9part',
-                          subtitle: '',
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              AddressAutocompleteField(
-                                controller: _departureController,
-                                focusNode: _departureFocusNode,
-                                labelText: 'Adresse de d\u00E9part',
-                                hintText: 'Ex: Cocody, Abidjan',
-                                apiKey: _googleMapsApiKey,
-                                onChanged: _handleDepartureChanged,
-                                onSuggestionSelected: (_) => _handleDepartureConfirmed(),
-                              ),
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton.icon(
-                                  onPressed: _isFetchingLocation ? null : _useCurrentLocationForDeparture,
-                                  icon: _isFetchingLocation
-                                      ? const SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
-                                        )
-                                      : const Icon(Icons.my_location_rounded),
-                                  label: Text(
-                                    _isFetchingLocation
-                                        ? 'Localisation en cours...'
-                                        : 'Utiliser ma position',
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                    onPageChanged: (int index) => setState(() => _currentStep = index),
+                    children: <Widget>[
+                      // Step 0 — Départ
+                      _StepCard(
+                        icon: Icons.trip_origin_rounded,
+                        title: 'Départ',
+                        child: _AddressLureField(
+                          value: _departureController.text.trim(),
+                          hint: 'Ex: Cocody, Abidjan',
+                          icon: Icons.my_location_rounded,
+                          onTap: _openDepartureSheet,
                         ),
-                        delayMs: 40,
-                        ),
-                      ),
-                      _buildAnimatedStepCard(
-                        index: 1,
-                        child: _animateEntrance(
-                          _StepCard(
-                          icon: Icons.flag_circle_outlined,
-                          title: 'Arriv\u00E9e',
-                          subtitle: '',
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              AddressAutocompleteField(
-                                controller: _arrivalController,
-                                focusNode: _arrivalFocusNode,
-                                labelText: 'Adresse d\'arriv\u00E9e',
-                                hintText: 'Ex: Plateau, Abidjan',
-                                apiKey: _googleMapsApiKey,
-                                onChanged: (_) => setState(() {}),
-                              ),
-                              const SizedBox(height: 14),
-                              Row(
-                                children: [
+                      ).animate().fadeIn(delay: 40.ms, duration: 300.ms).slideY(begin: 0.08, end: 0),
+                      // Step 1 — Arrivée + date
+                      _StepCard(
+                        icon: Icons.flag_circle_outlined,
+                        title: 'Arrivée',
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            _AddressLureField(
+                              value: _arrivalController.text.trim(),
+                              hint: 'Ex: Plateau, Abidjan',
+                              icon: Icons.flag_rounded,
+                              onTap: _openArrivalSheet,
+                            ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: <Widget>[
+                                for (final _BookingDateChoice choice in _BookingDateChoice.values) ...<Widget>[
+                                  if (choice != _BookingDateChoice.values.first) const SizedBox(width: 8),
                                   Expanded(
                                     child: _DateChoiceChip(
-                                      label: 'Aujourd\'hui',
-                                      selected: _dateChoice == _BookingDateChoice.today,
-                                      onTap: () => _selectDateChoice(_BookingDateChoice.today),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: _DateChoiceChip(
-                                      label: 'Demain',
-                                      selected: _dateChoice == _BookingDateChoice.tomorrow,
-                                      onTap: () => _selectDateChoice(_BookingDateChoice.tomorrow),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: _DateChoiceChip(
-                                      label: _dateChoice == _BookingDateChoice.custom
-                                          ? _labelForChoice(_BookingDateChoice.custom)
-                                          : 'Choisir',
-                                      selected: _dateChoice == _BookingDateChoice.custom,
-                                      onTap: () => _selectDateChoice(_BookingDateChoice.custom),
+                                      label: _labelForChoice(choice),
+                                      selected: _dateChoice == choice,
+                                      onTap: () => _selectDateChoice(choice),
                                     ),
                                   ),
                                 ],
-                              ),
-                              const SizedBox(height: 10),
-                              Text(
-                                'Date choisie : ${_formatSelectedDateLabel()}',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: const Color(0xFF5B647A),
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                              ),
-                            ],
-                          ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              'Date choisie : ${_formatSelectedDateLabel()}',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: const Color(0xFF5B647A),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
+                          ],
                         ),
-                        delayMs: 90,
-                        ),
-                      ),
+                      ).animate().fadeIn(delay: 90.ms, duration: 300.ms).slideY(begin: 0.08, end: 0),
                     ],
                   ),
                 ),
@@ -624,36 +517,26 @@ class _BookTripPageState extends State<BookTripPage> {
                             ? (_departureController.text.trim().length >= 3 ? () => _goToStep(1) : null)
                             : _submitSearch,
                     icon: _isSearchingTrips
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : Icon(_currentStep == 0 ? Icons.arrow_forward_rounded : Icons.search_rounded),
                     label: Text(
                       _isSearchingTrips
                           ? 'Recherche en cours...'
-                          : (_currentStep == 0 ? 'Continuer vers arriv\u00E9e' : 'Rechercher des trajets'),
+                          : (_currentStep == 0 ? 'Continuer vers arrivée' : 'Rechercher des trajets'),
                     ),
-                  )
-                      .animate(target: _isSearchingTrips ? 1 : 0)
-                      .scale(begin: const Offset(1, 1), end: const Offset(0.985, 0.985), duration: 180.ms),
+                  ),
                 ).animate().fadeIn(delay: 120.ms, duration: 260.ms).slideY(begin: 0.12, end: 0),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  child: _lastResults.isEmpty
-                      ? const SizedBox(height: 0)
-                      : Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: Text(
-                            '${_lastResults.length} r\u00E9sultat(s) trouv\u00E9s lors de la derni\u00E8re recherche.',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: const Color(0xFF5B647A),
-                                  fontWeight: FontWeight.w600,
-                                ),
+                if (_lastResults.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(
+                      '${_lastResults.length} résultat(s) trouvé(s) lors de la dernière recherche.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF5B647A),
+                            fontWeight: FontWeight.w600,
                           ),
-                        ).animate().fadeIn(duration: 220.ms).slideY(begin: 0.18, end: 0),
-                ),
+                    ),
+                  ).animate().fadeIn(duration: 220.ms).slideY(begin: 0.18, end: 0),
               ],
             ),
           ),
@@ -664,11 +547,7 @@ class _BookTripPageState extends State<BookTripPage> {
 }
 
 class _TopHero extends StatelessWidget {
-  const _TopHero({
-    required this.currentStep,
-    required this.onStepTap,
-  });
-
+  const _TopHero({required this.currentStep, required this.onStepTap});
   final int currentStep;
   final ValueChanged<int> onStepTap;
 
@@ -686,7 +565,7 @@ class _TopHero extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: _travelAccent.withOpacity(0.22),
+            color: _travelAccent.withValues(alpha: 0.22),
             blurRadius: 24,
             offset: const Offset(0, 12),
           ),
@@ -704,29 +583,17 @@ class _TopHero extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '1. D\u00E9part  2. Arriv\u00E9e + date',
+            '1. Départ  2. Arrivée + date',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Colors.white.withOpacity(0.9),
+              color: Colors.white.withValues(alpha: 0.9),
             ),
           ),
           const SizedBox(height: 14),
           Row(
             children: [
-              Expanded(
-                child: _ProgressStep(
-                  label: 'D\u00E9part',
-                  selected: currentStep == 0,
-                  onTap: () => onStepTap(0),
-                ),
-              ),
+              Expanded(child: _ProgressStep(label: 'Départ', selected: currentStep == 0, onTap: () => onStepTap(0))),
               const SizedBox(width: 8),
-              Expanded(
-                child: _ProgressStep(
-                  label: 'Arriv\u00E9e',
-                  selected: currentStep == 1,
-                  onTap: () => onStepTap(1),
-                ),
-              ),
+              Expanded(child: _ProgressStep(label: 'Arrivée', selected: currentStep == 1, onTap: () => onStepTap(1))),
             ],
           ),
         ],
@@ -736,12 +603,7 @@ class _TopHero extends StatelessWidget {
 }
 
 class _ProgressStep extends StatelessWidget {
-  const _ProgressStep({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
+  const _ProgressStep({required this.label, required this.selected, required this.onTap});
   final String label;
   final bool selected;
   final VoidCallback onTap;
@@ -749,7 +611,7 @@ class _ProgressStep extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? Colors.white : Colors.white.withOpacity(0.2),
+      color: selected ? Colors.white : Colors.white.withValues(alpha: 0.2),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -771,22 +633,13 @@ class _ProgressStep extends StatelessWidget {
 }
 
 class _StepCard extends StatelessWidget {
-  const _StepCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.child,
-  });
-
+  const _StepCard({required this.icon, required this.title, required this.child});
   final IconData icon;
   final String title;
-  final String subtitle;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final bool hasSubtitle = subtitle.trim().isNotEmpty;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -794,56 +647,80 @@ class _StepCard extends StatelessWidget {
         border: Border.all(color: _travelSurfaceBorder),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF14387B).withOpacity(0.07),
+            color: const Color(0xFF14387B).withValues(alpha: 0.07),
             blurRadius: 22,
             offset: const Offset(0, 12),
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: _travelAccentSoft,
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  child: Icon(icon, color: _travelAccentDark),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: const Color(0xFF0F1A35),
-                    ),
-                  ),
-                ),
+                Icon(icon, color: _travelAccent, size: 20),
+                const SizedBox(width: 8),
+                Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
               ],
             ),
-            if (hasSubtitle) ...[
-              const SizedBox(height: 8),
-              Text(
-                subtitle,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF5B647A),
+            const SizedBox(height: 16),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AddressLureField extends StatelessWidget {
+  const _AddressLureField({
+    required this.value,
+    required this.hint,
+    required this.icon,
+    required this.onTap,
+  });
+  final String value;
+  final String hint;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool hasValue = value.isNotEmpty;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 56,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: hasValue ? const Color(0xFFF0FDF9) : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: hasValue ? _travelAccent.withValues(alpha: 0.4) : const Color(0xFFE2E8F0),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: hasValue ? _travelAccentDark : const Color(0xFFCBD5E1)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                hasValue ? value : hint,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: hasValue ? FontWeight.w600 : FontWeight.w400,
+                  color: hasValue ? const Color(0xFF0F172A) : const Color(0xFFCBD5E1),
                 ),
               ),
-              const SizedBox(height: 16),
-            ] else
-              const SizedBox(height: 10),
-            Expanded(
-              child: SingleChildScrollView(
-                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                child: child,
-              ),
+            ),
+            Icon(
+              hasValue ? Icons.edit_rounded : Icons.search_rounded,
+              size: 16,
+              color: hasValue ? _travelAccent : const Color(0xFFCBD5E1),
             ),
           ],
         ),
@@ -853,35 +730,132 @@ class _StepCard extends StatelessWidget {
 }
 
 class _DateChoiceChip extends StatelessWidget {
-  const _DateChoiceChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
+  const _DateChoiceChip({required this.label, required this.selected, required this.onTap});
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: selected ? _travelAccent : _travelAccentSoft,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: selected ? Colors.white : _travelAccentDark,
-              fontWeight: FontWeight.w700,
-            ),
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? _travelAccent : const Color(0xFFF1F5F9),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: selected ? Colors.white : const Color(0xFF64748B),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+class _AddressSheet extends StatefulWidget {
+  const _AddressSheet({
+    required this.title,
+    required this.hint,
+    required this.controller,
+    required this.apiKey,
+    this.onGps,
+    this.isFetchingGps = false,
+  });
+  final String title;
+  final String hint;
+  final TextEditingController controller;
+  final String apiKey;
+  final VoidCallback? onGps;
+  final bool isFetchingGps;
+
+  @override
+  State<_AddressSheet> createState() => _AddressSheetState();
+}
+
+class _AddressSheetState extends State<_AddressSheet> {
+  late final FocusNode _focus;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus = FocusNode();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height - 80,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(
+        top: true,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 32, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(999)),
+                ),
+              ),
+              Text(widget.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+              const SizedBox(height: 14),
+              AddressAutocompleteField(
+                controller: widget.controller,
+                focusNode: _focus,
+                labelText: widget.title,
+                hintText: widget.hint,
+                apiKey: widget.apiKey,
+                onChanged: (_) {},
+                onSuggestionSelected: (_) => Navigator.of(context).maybePop(),
+              ),
+              if (widget.onGps != null) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _travelAccentDark,
+                      side: const BorderSide(color: _travelSurfaceBorder),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: widget.isFetchingGps ? null : () {
+                      widget.onGps!();
+                      Navigator.of(context).maybePop();
+                    },
+                    icon: widget.isFetchingGps
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.my_location_rounded, size: 18),
+                    label: Text(widget.isFetchingGps ? 'Localisation...' : 'Utiliser ma position'),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ),
@@ -927,12 +901,12 @@ class _TripResultTile extends StatelessWidget {
 
   String _driverLabel() {
     final String name = (trip.driverName ?? '').trim();
-    return name.isEmpty ? 'Conducteur non renseign\u00E9' : name;
+    return name.isEmpty ? 'Conducteur non renseigné' : name;
   }
 
   String _vehicleLabel() {
     final String vehicle = (trip.raw['vehicleModel'] ?? '').toString().trim();
-    return vehicle.isEmpty ? 'V\u00E9hicule non renseign\u00E9' : vehicle;
+    return vehicle.isEmpty ? 'Véhicule non renseigné' : vehicle;
   }
 
   @override
@@ -961,7 +935,7 @@ class _TripResultTile extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: _travelAccent.withOpacity(0.10),
+                color: _travelAccent.withValues(alpha: 0.10),
                 blurRadius: 18,
                 offset: const Offset(0, 10),
               ),
@@ -983,7 +957,7 @@ class _TripResultTile extends StatelessWidget {
                             width: 54,
                             padding: const EdgeInsets.symmetric(vertical: 6),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.84),
+                              color: Colors.white.withValues(alpha: 0.84),
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(color: _travelSurfaceBorder),
                             ),
@@ -1026,7 +1000,7 @@ class _TripResultTile extends StatelessWidget {
                                     shape: BoxShape.circle,
                                     boxShadow: [
                                       BoxShadow(
-                                        color: _travelAccent.withOpacity(0.35),
+                                        color: _travelAccent.withValues(alpha: 0.35),
                                         blurRadius: 8,
                                       ),
                                     ],
@@ -1054,7 +1028,7 @@ class _TripResultTile extends StatelessWidget {
                                 ),
                               ],
                             ),
-                          ),
+                            ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -1109,7 +1083,7 @@ class _TripResultTile extends StatelessWidget {
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: _travelAccent.withOpacity(0.24),
+                              color: _travelAccent.withValues(alpha: 0.24),
                               blurRadius: 14,
                               offset: const Offset(0, 8),
                             ),
@@ -1143,7 +1117,7 @@ class _TripResultTile extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.68),
+                    color: Colors.white.withValues(alpha: 0.68),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: _travelSurfaceBorder),
                   ),
@@ -1225,6 +1199,174 @@ class _TripResultTile extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _CompanyChipRow extends StatelessWidget {
+  const _CompanyChipRow({
+    required this.companies,
+    required this.selectedIds,
+    required this.onToggle,
+  });
+
+  final List<TransportCompany> companies;
+  final Set<String> selectedIds;
+  final ValueChanged<String> onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool allSelected = selectedIds.isEmpty;
+    // "Tous" + compagnies
+    final int count = companies.length + 1;
+
+    return SizedBox(
+      height: 72,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.zero,
+        itemCount: count,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            // Chip "Tous"
+            return GestureDetector(
+              onTap: () => onToggle('__tous__'),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+                width: 72,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: allSelected ? _travelAccent : const Color(0xFFD8F3EE),
+                    width: allSelected ? 2.5 : 1.5,
+                  ),
+                  color: allSelected
+                      ? _travelAccent.withValues(alpha: 0.10)
+                      : Colors.white,
+                  boxShadow: allSelected
+                      ? [
+                          BoxShadow(
+                            color: _travelAccent.withValues(alpha: 0.18),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ]
+                      : const [],
+                ),
+                child: Center(
+                  child: Text(
+                    'Tous',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: allSelected ? _travelAccentDark : const Color(0xFF64748B),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
+
+          final TransportCompany company = companies[index - 1];
+          final bool isSelected = selectedIds.contains(company.id);
+
+          return GestureDetector(
+            onTap: () => onToggle(company.id),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              width: 112,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isSelected ? _travelAccent : const Color(0xFFD8F3EE),
+                  width: isSelected ? 2.5 : 1.5,
+                ),
+                color: isSelected
+                    ? _travelAccent.withValues(alpha: 0.07)
+                    : Colors.white,
+                boxShadow: isSelected
+                    ? [
+                        BoxShadow(
+                          color: _travelAccent.withValues(alpha: 0.18),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ]
+                    : const [],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(13),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (company.imageUrl != null)
+                      Image.network(
+                        company.imageUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(
+                                alpha: company.imageUrl != null ? 0.55 : 0.0),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
+                        child: Text(
+                          company.name,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: company.imageUrl != null
+                                ? Colors.white
+                                : (isSelected
+                                    ? _travelAccentDark
+                                    : const Color(0xFF0F172A)),
+                            shadows: company.imageUrl != null
+                                ? const [Shadow(blurRadius: 4, color: Colors.black54)]
+                                : null,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (isSelected)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          width: 18,
+                          height: 18,
+                          decoration: const BoxDecoration(
+                            color: _travelAccent,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.check_rounded,
+                              size: 12, color: Colors.white),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

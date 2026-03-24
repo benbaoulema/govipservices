@@ -15,7 +15,6 @@ import 'package:govipservices/features/travel/domain/usecases/trip_detail_usecas
 import 'package:govipservices/features/travel/presentation/pages/edit_trip_page.dart';
 import 'package:govipservices/features/travel/presentation/state/trip_detail_cubit.dart';
 import 'package:govipservices/features/travel/presentation/state/trip_detail_state.dart';
-import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
 const Color _travelAccent = Color(0xFF14B8A6);
 const Color _travelAccentDark = Color(0xFF0F766E);
@@ -1334,7 +1333,22 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
     return Scaffold(
       backgroundColor: _travelPageBg,
       appBar: AppBar(
-        leading: const HomeAppBarButton(),
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: GestureDetector(
+            onTap: () => Navigator.of(context).maybePop(),
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.30)),
+              ),
+              child: const Icon(Icons.arrow_back_ios_new_rounded, size: 15, color: Colors.white),
+            ),
+          ),
+        ),
         title: const Text('Passagers'),
       ),
       body: GestureDetector(
@@ -1876,7 +1890,22 @@ class TripDetailAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     return AppBar(
-      leading: const HomeAppBarButton(),
+      leading: Padding(
+        padding: const EdgeInsets.only(left: 12),
+        child: GestureDetector(
+          onTap: () => Navigator.of(context).maybePop(),
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.30)),
+            ),
+            child: const Icon(Icons.arrow_back_ios_new_rounded, size: 15, color: Colors.white),
+          ),
+        ),
+      ),
       title: const Text('D\u00E9tail du trajet'),
       elevation: 0,
       backgroundColor: Colors.transparent,

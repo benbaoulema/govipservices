@@ -6,7 +6,6 @@ import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:geocoding/geocoding.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -25,6 +24,7 @@ import 'package:govipservices/features/user/models/user_phone.dart';
 import 'package:govipservices/features/parcels/presentation/services/delivery_notification_service.dart';
 import 'package:govipservices/features/parcels/presentation/widgets/delivery_completion_dialog.dart';
 import 'package:govipservices/features/user/models/user_role.dart';
+import 'package:govipservices/shared/services/location_service.dart';
 
 
 part 'ship_package_step_widgets.dart';
@@ -399,92 +399,38 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
 
   Future<void> _useCurrentLocationForPickup() async {
     if (_isFetchingPickupLocation) return;
-
-    setState(() {
-      _isFetchingPickupLocation = true;
-    });
-
+    setState(() => _isFetchingPickupLocation = true);
     try {
-      final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _showMessage(
-          'Activez la localisation pour utiliser votre position actuelle.',
-        );
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        _showMessage(
-          'Autorisez la localisation pour préremplir le lieu de récupération.',
-        );
-        return;
-      }
-
-      final Position position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
-      final String resolvedAddress = await _reverseGeocodePosition(position);
-
-      _pickupController.text = resolvedAddress;
-      _pickupController.selection = TextSelection.collapsed(
-        offset: resolvedAddress.length,
-      );
-
+      final LocationResult? result = await LocationService.instance.getCurrent();
       if (!mounted) return;
+      if (result == null) {
+        _showMessage('Impossible de récupérer votre position actuelle.');
+        return;
+      }
+      _pickupController.text = result.address;
+      _pickupController.selection = TextSelection.collapsed(offset: result.address.length);
       setState(() {
         _pickup = _pickup.copyWith(
-          address: resolvedAddress,
-          lat: position.latitude,
-          lng: position.longitude,
+          address: result.address,
+          lat: result.position.latitude,
+          lng: result.position.longitude,
           placeId: null,
         );
         _matches = const <ParcelServiceMatch>[];
         _selectedMatch = null;
         _hasSearchedMatches = false;
-        });
+      });
       _showMessage('Adresse de récupération renseignée depuis votre position.');
       _refreshRoutePreview();
       _refreshRequestMapViewport();
     } catch (_) {
+      if (!mounted) return;
       _showMessage('Impossible de récupérer votre position actuelle.');
     } finally {
       if (mounted) setState(() => _isFetchingPickupLocation = false);
     }
   }
 
-  Future<String> _reverseGeocodePosition(Position position) async {
-    try {
-      final List<Placemark> placemarks = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
-      final Placemark? first = placemarks.isNotEmpty ? placemarks.first : null;
-      final String address = <String?>[
-        first?.street,
-        first?.subLocality,
-        first?.locality,
-        first?.country,
-      ]
-          .whereType<String>()
-          .map((part) => part.trim())
-          .where((part) => part.isNotEmpty)
-          .join(', ');
-      if (address.isNotEmpty) return address;
-    } catch (_) {
-      // Fallback to raw coordinates below.
-    }
-
-    return '${position.latitude.toStringAsFixed(5)}, '
-        '${position.longitude.toStringAsFixed(5)}';
-  }
 
   LatLng get _requestMapCenter {
     if (_pickup.lat != null && _pickup.lng != null) {
@@ -2504,6 +2450,7 @@ class _ShipPackagePageState extends State<ShipPackagePage> {
                       onCancel: _cancelRequest,
                       onTimeout: _autoMode ? _autoRetryAfterTimeout : null,
                       scrollController: scrollController,
+                      overridePrice: _proposedPrice,
                     )
                   else
                   Expanded(child: ListView(controller: scrollController, padding: EdgeInsets.zero, children: <Widget>[

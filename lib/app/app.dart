@@ -7,6 +7,7 @@ import 'package:govipservices/app/router/app_router.dart';
 import 'package:govipservices/features/parcels/presentation/widgets/active_delivery_banner.dart';
 import 'package:govipservices/features/parcels/presentation/widgets/global_parcel_request_listener.dart';
 import 'package:govipservices/features/travel/presentation/widgets/global_booking_request_listener.dart';
+import 'package:govipservices/shared/services/location_service.dart';
 
 class GoVipApp extends StatefulWidget {
   const GoVipApp({super.key});
@@ -19,6 +20,9 @@ class _GoVipAppState extends State<GoVipApp> {
   @override
   void initState() {
     super.initState();
+    // Résolution GPS en arrière-plan dès le démarrage, pour pré-remplir
+    // les champs "Départ" sans attendre que l'utilisateur ouvre une page.
+    LocationService.instance.warmup();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ParcelLiveActivityDeepLinkService.instance.initialize();
     });

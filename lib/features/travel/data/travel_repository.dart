@@ -229,6 +229,27 @@ class TravelRepository implements TravelService {
     return trips.take(limit).toList(growable: false);
   }
 
+  Future<List<TripSearchResult>> fetchTripsByCompanyName(String companyName, {int limit = 40}) async {
+    if (companyName.trim().isEmpty) return const <TripSearchResult>[];
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _firestore
+        .collection('voyageTrips')
+        .where('status', isEqualTo: 'published')
+        .limit(300)
+        .get();
+    final String cn = normalizeAddressSearch(companyName);
+    final List<TripSearchResult> trips = snapshot.docs
+        .map(_tripFromDoc)
+        .whereType<TripSearchResult>()
+        .where((TripSearchResult t) {
+          if (t.driverName == null || t.driverName!.isEmpty) return false;
+          final String dn = normalizeAddressSearch(t.driverName!);
+          return dn.contains(cn) || cn.contains(dn);
+        })
+        .toList(growable: true);
+    trips.sort((a, b) => a.departureDate.compareTo(b.departureDate));
+    return trips.take(limit).toList(growable: false);
+  }
+
   Future<List<TripSearchResult>> fetchTripsByOwnerUid(String ownerUid, {int limit = 50}) async {
     final String normalizedUid = ownerUid.trim();
     if (normalizedUid.isEmpty) return const <TripSearchResult>[];

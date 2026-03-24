@@ -6,7 +6,9 @@ import 'package:govipservices/features/parcels/data/vehicle_type_repository.dart
 import 'package:govipservices/features/parcels/domain/models/vehicle_type.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/notifications/presentation/widgets/notifications_app_bar_button.dart';
+import 'package:govipservices/features/travel/data/transport_company_repository.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
+import 'package:govipservices/features/travel/domain/models/transport_company.dart';
 import 'package:govipservices/features/travel/domain/models/trip_detail_models.dart';
 import 'package:govipservices/features/travel/presentation/pages/my_trips_page.dart';
 import 'package:govipservices/features/user/data/user_availability_service.dart';
@@ -44,14 +46,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final TravelRepository _travelRepository = TravelRepository();
   final UserAvailabilityService _availabilityService = UserAvailabilityService();
   final VehicleTypeRepository _vehicleTypeRepo = VehicleTypeRepository();
+  final TransportCompanyRepository _companyRepo = TransportCompanyRepository();
   HomeMode _activeMode = HomeMode.travel;
   int _travelIndex = 0;
   int _parcelsIndex = 0;
-  late Future<List<TripSearchResult>> _featuredProTripsFuture;
   UserAvailabilitySnapshot _availability = UserAvailabilitySnapshot.offline();
   bool _isUpdatingAvailability = false;
   List<VehicleType> _vehicleTypes = const <VehicleType>[];
   VehicleType? _selectedVehicleType;
+  List<TransportCompany> _companies = const <TransportCompany>[];
+  bool _companiesLoading = true;
 
   static const List<HomeMenuItem> _travelItems = [
     HomeMenuItem(
@@ -135,9 +139,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _featuredProTripsFuture = _loadFeaturedProTrips();
     _loadAvailability();
     _loadVehicleTypes();
+    _loadCompanies();
     _syncWakeLock();
   }
 
@@ -178,8 +182,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     SafeWakelockService.setEnabled(shouldKeepScreenOn);
   }
 
-  Future<List<TripSearchResult>> _loadFeaturedProTrips() {
-    return _travelRepository.fetchFeaturedProTrips();
+  Future<void> _loadCompanies() async {
+    try {
+      final List<TransportCompany> list = await _companyRepo.fetchEnabled();
+      if (!mounted) return;
+      setState(() {
+        _companies = list;
+        _companiesLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _companiesLoading = false);
+    }
+  }
+
+  Future<void> _openCompanyTrips(TransportCompany company) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _CompanyTripsSheet(
+        company: company,
+        travelRepository: _travelRepository,
+        accent: _travelAccent,
+        onOpenTrip: _openFeaturedTrip,
+      ),
+    );
   }
 
   Future<void> _loadAvailability() async {
@@ -214,11 +242,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshHome() async {
-    final Future<List<TripSearchResult>> featuredProTripsFuture = _loadFeaturedProTrips();
-    setState(() {
-      _featuredProTripsFuture = featuredProTripsFuture;
-    });
-    await featuredProTripsFuture;
+    setState(() => _companiesLoading = true);
+    await _loadCompanies();
   }
 
   Future<void> _openAccount() async {
@@ -534,18 +559,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                       sliver: SliverToBoxAdapter(
                         child: isTravel
-                            ? _FeaturedProTripsSection(
-                                future: _featuredProTripsFuture,
-                                accent: accent,
-                                onOpenTrip: _openFeaturedTrip,
+                            ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _CompaniesSection(
+                                    companies: _companies,
+                                    isLoading: _companiesLoading,
+                                    accent: accent,
+                                    onTap: _openCompanyTrips,
+                                  ).animate().fadeIn(delay: 80.ms, duration: 260.ms).slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic),
+                                  const SizedBox(height: 24),
+                                  _ConfortServicesSection(accent: accent)
+                                    .animate().fadeIn(delay: 160.ms, duration: 260.ms).slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic),
+                                ],
                               )
-                                  .animate()
-                                  .fadeIn(delay: 80.ms, duration: 260.ms)
-                                  .slideY(
-                                    begin: 0.04,
-                                    end: 0,
-                                    curve: Curves.easeOutCubic,
-                                  )
                             : Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: <Widget>[
@@ -1180,62 +1207,433 @@ class _HeroActionButton extends StatelessWidget {
   }
 }
 
-class _FeaturedProTripsSection extends StatelessWidget {
-  const _FeaturedProTripsSection({
-    required this.future,
+// ─── Companies Section ────────────────────────────────────────────────────────
+
+class _CompaniesSection extends StatelessWidget {
+  const _CompaniesSection({
+    required this.companies,
+    required this.isLoading,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final List<TransportCompany> companies;
+  final bool isLoading;
+  final Color accent;
+  final ValueChanged<TransportCompany> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Compagnies de transport',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Explorez les trajets par compagnie.',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: const Color(0xFF5B6472),
+          ),
+        ),
+        const SizedBox(height: 14),
+        if (isLoading)
+          _CompaniesLoadingRow(accent: accent)
+        else if (companies.isEmpty)
+          _FeaturedTripsEmpty(accent: accent)
+        else
+          SizedBox(
+            height: 148,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(bottom: 4),
+              itemCount: companies.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 14),
+              itemBuilder: (context, i) => _CompanyCard(
+                company: companies[i],
+                accent: accent,
+                onTap: () => onTap(companies[i]),
+              )
+                  .animate()
+                  .fadeIn(delay: Duration(milliseconds: 60 * i), duration: 260.ms)
+                  .slideX(begin: 0.06, end: 0),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _CompanyCard extends StatelessWidget {
+  const _CompanyCard({
+    required this.company,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final TransportCompany company;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final String? imageUrl = company.imageUrl;
+    final String initial = company.name.isNotEmpty ? company.name[0].toUpperCase() : '?';
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 210,
+        height: 144,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.13),
+              blurRadius: 18,
+              offset: const Offset(0, 7),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Photo ou fallback dégradé
+              if (imageUrl != null && imageUrl.isNotEmpty)
+                Image.network(
+                  imageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      _CompanyCardFallback(initial: initial, accent: accent),
+                )
+              else
+                _CompanyCardFallback(initial: initial, accent: accent),
+              // Overlay dégradé bas
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: const [0.35, 1.0],
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withValues(alpha: 0.76),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Border interne subtile
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14),
+                    ),
+                  ),
+                ),
+              ),
+              // Nom centré en bas
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: 12,
+                child: Text(
+                  company.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    height: 1.25,
+                    shadows: [
+                      Shadow(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompanyCardFallback extends StatelessWidget {
+  const _CompanyCardFallback({required this.initial, required this.accent});
+  final String initial;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.lerp(accent, const Color(0xFF0F4C75), 0.55)!,
+            Color.lerp(accent, const Color(0xFF0F766E), 0.3)!,
+          ],
+        ),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Cercle décoratif en arrière-plan
+          Positioned(
+            top: -20,
+            right: -20,
+            child: Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.06),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -30,
+            left: -15,
+            child: Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.05),
+              ),
+            ),
+          ),
+          // Icône + initiale
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.directions_bus_rounded, color: Colors.white, size: 26),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  initial,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompaniesLoadingRow extends StatelessWidget {
+  const _CompaniesLoadingRow({required this.accent});
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 148,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(bottom: 4),
+        itemCount: 4,
+        separatorBuilder: (_, __) => const SizedBox(width: 14),
+        itemBuilder: (_, i) => Container(
+          width: 210,
+          height: 144,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            color: accent.withValues(alpha: 0.10),
+          ),
+        )
+            .animate(onPlay: (c) => c.repeat())
+            .shimmer(duration: 1200.ms, color: Colors.white.withValues(alpha: 0.5)),
+      ),
+    );
+  }
+}
+
+// ─── Company Trips Sheet ───────────────────────────────────────────────────────
+
+class _CompanyTripsSheet extends StatefulWidget {
+  const _CompanyTripsSheet({
+    required this.company,
+    required this.travelRepository,
     required this.accent,
     required this.onOpenTrip,
   });
 
-  final Future<List<TripSearchResult>> future;
+  final TransportCompany company;
+  final TravelRepository travelRepository;
   final Color accent;
   final ValueChanged<TripSearchResult> onOpenTrip;
 
   @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<TripSearchResult>>(
-      future: future,
-      builder: (context, snapshot) {
-        final List<TripSearchResult> trips = snapshot.data ?? const <TripSearchResult>[];
+  State<_CompanyTripsSheet> createState() => _CompanyTripsSheetState();
+}
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Compagnies de transport',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
+class _CompanyTripsSheetState extends State<_CompanyTripsSheet> {
+  List<TripSearchResult> _trips = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final List<TripSearchResult> trips =
+          await widget.travelRepository.fetchTripsByCompanyName(widget.company.name);
+      if (!mounted) return;
+      setState(() {
+        _trips = trips;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final String? imageUrl = widget.company.imageUrl;
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.72,
+      minChildSize: 0.4,
+      maxChildSize: 0.94,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFFF8FFFE),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            children: [
+              // Handle
+              const SizedBox(height: 10),
+              Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFCBD5E1),
+                  borderRadius: BorderRadius.circular(999),
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Réservez rapidement auprès de compagnies de transport disponibles.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: const Color(0xFF5B6472),
-              ),
-            ),
-            const SizedBox(height: 14),
-            if (snapshot.connectionState == ConnectionState.waiting)
-              _FeaturedTripsLoading(accent: accent)
-            else if (snapshot.hasError || trips.isEmpty)
-              _FeaturedTripsEmpty(accent: accent)
-            else
-              Column(
-                children: [
-                  for (int index = 0; index < trips.length; index++) ...[
-                    _FeaturedTripCard(
-                      trip: trips[index],
-                      accent: accent,
-                      onTap: () => onOpenTrip(trips[index]),
-                    )
-                        .animate()
-                        .fadeIn(delay: Duration(milliseconds: 120 + (index * 80)), duration: 300.ms)
-                        .slideY(begin: 0.06, end: 0, curve: Curves.easeOutCubic),
-                    if (index != trips.length - 1) const SizedBox(height: 14),
+              const SizedBox(height: 16),
+              // Header compagnie
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: SizedBox(
+                        width: 52,
+                        height: 52,
+                        child: imageUrl != null && imageUrl.isNotEmpty
+                            ? Image.network(imageUrl, fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => _CompanyCardFallback(
+                                  initial: widget.company.name.isNotEmpty
+                                      ? widget.company.name[0].toUpperCase()
+                                      : '?',
+                                  accent: widget.accent,
+                                ))
+                            : _CompanyCardFallback(
+                                initial: widget.company.name.isNotEmpty
+                                    ? widget.company.name[0].toUpperCase()
+                                    : '?',
+                                accent: widget.accent,
+                              ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.company.name,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF0F1A35),
+                            ),
+                          ),
+                          if (!_loading)
+                            Text(
+                              _trips.isEmpty
+                                  ? 'Aucun trajet disponible'
+                                  : '${_trips.length} trajet${_trips.length > 1 ? 's' : ''} disponible${_trips.length > 1 ? 's' : ''}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: widget.accent,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ],
-                ],
+                ),
               ),
-          ],
+              const Divider(height: 1, color: Color(0xFFE8F5F2)),
+              // Liste trajets
+              Expanded(
+                child: _loading
+                    ? Center(child: CircularProgressIndicator(color: widget.accent, strokeWidth: 2.5))
+                    : _trips.isEmpty
+                        ? _FeaturedTripsEmpty(accent: widget.accent)
+                        : ListView.separated(
+                            controller: scrollController,
+                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+                            itemCount: _trips.length,
+                            separatorBuilder: (_, __) => const SizedBox(height: 14),
+                            itemBuilder: (context, i) => _FeaturedTripCard(
+                              trip: _trips[i],
+                              accent: widget.accent,
+                              onTap: () {
+                                Navigator.of(context).pop();
+                                widget.onOpenTrip(_trips[i]);
+                              },
+                            )
+                                .animate()
+                                .fadeIn(delay: Duration(milliseconds: 40 * i), duration: 220.ms)
+                                .slideY(begin: 0.06, end: 0),
+                          ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -1980,4 +2378,325 @@ class _VehicleChipRow extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── Confort Services ─────────────────────────────────────────────────────────
+
+enum _ConfortServiceType { taxi, alimentation }
+
+class _ConfortServicesSection extends StatelessWidget {
+  const _ConfortServicesSection({required this.accent});
+  final Color accent;
+
+  void _openInfo(BuildContext context, _ConfortServiceType type) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ConfortServiceSheet(type: type, accent: accent),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Services Confort',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Voyagez sereinement de porte à porte.',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: const Color(0xFF5B6472),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: _ConfortServiceCard(
+                type: _ConfortServiceType.taxi,
+                accent: accent,
+                onTap: () => _openInfo(context, _ConfortServiceType.taxi),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: _ConfortServiceCard(
+                type: _ConfortServiceType.alimentation,
+                accent: accent,
+                onTap: () => _openInfo(context, _ConfortServiceType.alimentation),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ConfortServiceCard extends StatelessWidget {
+  const _ConfortServiceCard({
+    required this.type,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final _ConfortServiceType type;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isTaxi = type == _ConfortServiceType.taxi;
+
+    final IconData icon = isTaxi ? Icons.local_taxi_rounded : Icons.lunch_dining_rounded;
+    final String title = isTaxi ? 'Taxi' : 'Alimentation';
+    final String subtitle = isTaxi
+        ? 'Gare → Domicile\nDomicile → Gare'
+        : 'Kit voyageur\nà emporter';
+    final List<Color> gradientColors = isTaxi
+        ? [const Color(0xFF1A3A5C), const Color(0xFF14B8A6)]
+        : [const Color(0xFF7C3A00), const Color(0xFFE67E22)];
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 140,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: gradientColors,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: gradientColors.last.withValues(alpha: 0.30),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            // Cercle décoratif
+            Positioned(
+              top: -18,
+              right: -18,
+              child: Container(
+                width: 88,
+                height: 88,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: -24,
+              left: -12,
+              child: Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withValues(alpha: 0.06),
+                ),
+              ),
+            ),
+            // Contenu
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Icon(icon, color: Colors.white, size: 22),
+                  ),
+                  const Spacer(),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.80),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Badge "En savoir plus"
+            Positioned(
+              top: 12,
+              right: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+                ),
+                child: const Text(
+                  'Info',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ConfortServiceSheet extends StatelessWidget {
+  const _ConfortServiceSheet({required this.type, required this.accent});
+  final _ConfortServiceType type;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isTaxi = type == _ConfortServiceType.taxi;
+
+    final String title = isTaxi ? 'Service Taxi' : 'Kit Alimentation';
+    final IconData icon = isTaxi ? Icons.local_taxi_rounded : Icons.lunch_dining_rounded;
+    final List<Color> gradientColors = isTaxi
+        ? [const Color(0xFF1A3A5C), const Color(0xFF14B8A6)]
+        : [const Color(0xFF7C3A00), const Color(0xFFE67E22)];
+
+    final List<_InfoRow> rows = isTaxi
+        ? const [
+            _InfoRow(icon: Icons.trip_origin_rounded, label: 'Départ', value: 'Votre domicile ou un point de rendez-vous'),
+            _InfoRow(icon: Icons.directions_transit_rounded, label: 'Arrivée', value: 'La gare routière de votre ville'),
+            _InfoRow(icon: Icons.u_turn_left_rounded, label: 'Retour', value: 'De la gare jusqu\'à votre domicile'),
+            _InfoRow(icon: Icons.schedule_rounded, label: 'Disponibilité', value: 'En fonction des horaires de départ'),
+            _InfoRow(icon: Icons.info_outline_rounded, label: 'Note', value: 'Service disponible prochainement dans votre zone.'),
+          ]
+        : const [
+            _InfoRow(icon: Icons.lunch_dining_rounded, label: 'Contenu', value: 'Eau, snacks, fruits secs et encas pour le trajet'),
+            _InfoRow(icon: Icons.add_shopping_cart_rounded, label: 'Commande', value: 'Ajoutez le kit lors de votre réservation'),
+            _InfoRow(icon: Icons.local_shipping_rounded, label: 'Livraison', value: 'Remis directement à bord ou en gare'),
+            _InfoRow(icon: Icons.info_outline_rounded, label: 'Note', value: 'Service disponible prochainement sur certains trajets.'),
+          ];
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFFF8FFFE),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              width: 40, height: 4,
+              margin: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFCBD5E1),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+          // Header
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: gradientColors,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 48, height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.20),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: Colors.white, size: 26),
+                ),
+                const SizedBox(width: 14),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          // Infos
+          ...rows.map((row) => Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 36, height: 36,
+                  decoration: BoxDecoration(
+                    color: gradientColors.last.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(row.icon, size: 18, color: gradientColors.last),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(row.label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                      const SizedBox(height: 2),
+                      Text(row.value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF0F1A35))),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          )),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoRow {
+  const _InfoRow({required this.icon, required this.label, required this.value});
+  final IconData icon;
+  final String label;
+  final String value;
 }
