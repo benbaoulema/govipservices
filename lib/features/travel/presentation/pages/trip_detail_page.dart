@@ -3366,10 +3366,16 @@ class _ConfortOptionsSheetState extends State<_ConfortOptionsSheet> {
         });
       } else {
         // open address sheet first
+        final double topOffset =
+            kToolbarHeight + MediaQuery.of(context).padding.top;
         final String? address = await showModalBottomSheet<String>(
           context: context,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,
+          useSafeArea: false,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height - topOffset,
+          ),
           builder: (_) => const _HomeAddressSheet(),
         );
         if (!mounted) return;
