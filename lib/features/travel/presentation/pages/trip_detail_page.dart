@@ -1267,6 +1267,40 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
     // null means dismissed without confirming
     if (selectedOptions == null || !mounted) return;
 
+    // Compute total including comfort surcharges
+    int comfortSurcharge = 0;
+    for (final String optId in selectedOptions) {
+      final _ConfortOption? opt = _kConfortOptions.cast<_ConfortOption?>().firstWhere(
+        (o) => o != null && (o.id == optId || optId.startsWith('${o.id}:')),
+        orElse: () => null,
+      );
+      if (opt?.price != null) comfortSurcharge += opt!.price!;
+    }
+    final int paymentTotal = widget.totalFare + comfortSurcharge;
+
+    // Pre-fill phone from first passenger contact or auth user
+    final String prefillPhone = widget.passengerContactControllers.first.text.trim().isNotEmpty
+        ? widget.passengerContactControllers.first.text.trim()
+        : (widget.authUser?.phoneNumber ?? '').trim();
+
+    final bool? paymentConfirmed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      useSafeArea: false,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height -
+            kToolbarHeight -
+            MediaQuery.of(context).padding.top,
+      ),
+      builder: (_) => _PaymentSheet(
+        totalAmount: paymentTotal,
+        currency: widget.trip.currency.isEmpty ? 'XOF' : widget.trip.currency,
+        userPhone: prefillPhone,
+      ),
+    );
+    if (paymentConfirmed != true || !mounted) return;
+
     setState(() {
       _errorText = null;
       _isSubmitting = true;
@@ -3678,5 +3712,223 @@ class _HomeAddressSheetState extends State<_HomeAddressSheet> {
       ),
     ),
   );
+  }
+}
+
+// ── Payment Sheet ───────────────────────────────────────────────────────────
+
+enum _PaymentMethod { wave, orangeMoney }
+
+class _PaymentSheet extends StatefulWidget {
+  const _PaymentSheet({
+    required this.totalAmount,
+    required this.currency,
+    required this.userPhone,
+  });
+
+  final int totalAmount;
+  final String currency;
+  final String userPhone;
+
+  @override
+  State<_PaymentSheet> createState() => _PaymentSheetState();
+}
+
+class _PaymentSheetState extends State<_PaymentSheet> {
+  _PaymentMethod? _method;
+  late final TextEditingController _phoneController;
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneController = TextEditingController(text: widget.userPhone);
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD1D9E6),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+
+              // Title + total
+              Row(
+                children: [
+                  Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      color: _travelAccentSoft,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.payments_rounded, color: _travelAccentDark, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Paiement', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF10233E))),
+                        Text(
+                          'Total à payer : ${widget.totalAmount} ${widget.currency}',
+                          style: const TextStyle(fontSize: 13, color: _travelAccentDark, fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // Method selection
+              const Text('Choisir le mode de paiement',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF4A5568))),
+              const SizedBox(height: 10),
+              _PaymentMethodTile(
+                label: 'Wave',
+                subtitle: 'Paiement mobile Wave',
+                color: const Color(0xFF1A56DB),
+                icon: Icons.waves_rounded,
+                selected: _method == _PaymentMethod.wave,
+                onTap: () => setState(() => _method = _PaymentMethod.wave),
+              ),
+              const SizedBox(height: 8),
+              _PaymentMethodTile(
+                label: 'Orange Money',
+                subtitle: 'Paiement mobile Orange',
+                color: const Color(0xFFFF6600),
+                icon: Icons.account_balance_wallet_rounded,
+                selected: _method == _PaymentMethod.orangeMoney,
+                onTap: () => setState(() => _method = _PaymentMethod.orangeMoney),
+              ),
+
+              // Phone field (shown once a method is selected)
+              if (_method != null) ...[
+                const SizedBox(height: 20),
+                Text(
+                  'Numéro ${_method == _PaymentMethod.wave ? "Wave" : "Orange Money"}',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF4A5568)),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: InputDecoration(
+                    hintText: 'Ex: +225 07 00 00 00 00',
+                    prefixIcon: const Icon(Icons.phone_rounded, size: 18),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _travelAccent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                    ),
+                    onPressed: _phoneController.text.trim().isEmpty
+                        ? null
+                        : () => Navigator.of(context).pop(true),
+                    icon: const Icon(Icons.check_circle_rounded),
+                    label: const Text('Payer et Réserver'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PaymentMethodTile extends StatelessWidget {
+  const _PaymentMethodTile({
+    required this.label,
+    required this.subtitle,
+    required this.color,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final String subtitle;
+  final Color color;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: selected ? color.withValues(alpha: 0.08) : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? color : const Color(0xFFD8E4EA),
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: selected ? color : const Color(0xFF10233E))),
+                  Text(subtitle, style: const TextStyle(fontSize: 11, color: Color(0xFF7A8CA8))),
+                ],
+              ),
+            ),
+            if (selected)
+              Icon(Icons.check_circle_rounded, color: color, size: 22),
+          ],
+        ),
+      ),
+    );
   }
 }
