@@ -220,6 +220,13 @@ class _DrawerSheet extends StatelessWidget {
                     ),
                   _DrawerDivider(),
                   _DrawerItem(
+                    icon: Icons.account_balance_wallet_rounded,
+                    label: 'Portefeuille',
+                    subtitle: 'Solde & transactions',
+                    onTap: () => _navigate(context, AppRoutes.wallet),
+                  ),
+                  _DrawerDivider(),
+                  _DrawerItem(
                     icon: Icons.person_outline_rounded,
                     label: 'Mon compte',
                     onTap: () => _navigate(context, AppRoutes.userAccount),

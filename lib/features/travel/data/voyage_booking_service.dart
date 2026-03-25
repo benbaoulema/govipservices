@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:govipservices/features/notifications/data/firestore_notifications_repository.dart';
 import 'package:govipservices/features/notifications/domain/models/app_notification.dart';
 import 'package:govipservices/features/travel/domain/models/voyage_booking_models.dart';
+import 'package:govipservices/features/wallet/data/wallet_service.dart';
 
 class VoyageBookingService {
   VoyageBookingService({FirebaseFirestore? firestore})
@@ -380,6 +381,17 @@ class VoyageBookingService {
       booking: booking,
       nextStatus: normalizedStatus,
     );
+
+    // Deduct 10% commission when the trip starts
+    if (normalizedStatus == 'in_progress' &&
+        booking.tripOwnerUid.isNotEmpty &&
+        booking.totalPrice > 0) {
+      await WalletService.instance.deductCommission(
+        driverUid: booking.tripOwnerUid,
+        tripTotalPrice: booking.totalPrice,
+        bookingTrackNum: booking.trackNum,
+      );
+    }
   }
 
   Future<void> cancelBookingById({

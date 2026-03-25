@@ -18,4 +18,6 @@ class AppRoutes {
   static const String travelTripDetail = '/travel/trip-detail';
   static const String travelMyTrips = '/travel/my-trips';
   static const String travelMessages = '/travel/messages';
+
+  static const String wallet = '/wallet';
 }
