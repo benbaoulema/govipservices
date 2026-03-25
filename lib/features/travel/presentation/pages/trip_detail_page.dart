@@ -19,6 +19,8 @@ import 'package:govipservices/features/travel/presentation/state/trip_detail_sta
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
 import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/shared/services/location_service.dart';
+import 'package:govipservices/features/travel/data/additional_service_repository.dart';
+import 'package:govipservices/features/travel/domain/models/additional_service_models.dart';
 
 const Color _travelAccent = Color(0xFF14B8A6);
 const Color _travelAccentDark = Color(0xFF0F766E);
@@ -222,9 +224,13 @@ class _SuccessBody extends StatefulWidget {
 
 class _SuccessBodyState extends State<_SuccessBody> {
   final VoyageBookingService _bookingService = VoyageBookingService();
+  final AdditionalServiceRepository _additionalServiceRepo =
+      const AdditionalServiceRepository();
   List<VoyageBookingDocument> _ownerBookings = const <VoyageBookingDocument>[];
   StreamSubscription<List<VoyageBookingDocument>>? _ownerBookingsSubscription;
   String? _inlineBusyBookingId;
+  List<AdditionalServiceDocument> _additionalServices =
+      const <AdditionalServiceDocument>[];
 
   TripDetailCubit get cubit => widget.cubit;
 
@@ -232,6 +238,17 @@ class _SuccessBodyState extends State<_SuccessBody> {
   void initState() {
     super.initState();
     _primeOwnerBookings();
+    _fetchAdditionalServices();
+  }
+
+  Future<void> _fetchAdditionalServices() async {
+    try {
+      final List<AdditionalServiceDocument> services =
+          await _additionalServiceRepo.fetchAll();
+      if (mounted) setState(() => _additionalServices = services);
+    } catch (_) {
+      // Silencieux — les options seront toutes visibles en cas d'erreur
+    }
   }
 
   void _primeOwnerBookings() {
@@ -656,6 +673,7 @@ class _SuccessBodyState extends State<_SuccessBody> {
           bookingService: bookingService,
           passengerNameControllers: passengerNameControllers,
           passengerContactControllers: passengerContactControllers,
+          additionalServices: _additionalServices,
           onLoginRequested: () async {
             Navigator.of(rootContext).pop();
             await Future<void>.delayed(const Duration(milliseconds: 120));
@@ -1138,6 +1156,7 @@ class _BookingConfirmationDialog extends StatefulWidget {
     required this.passengerNameControllers,
     required this.passengerContactControllers,
     required this.onLoginRequested,
+    this.additionalServices = const <AdditionalServiceDocument>[],
   });
 
   final TripDetailModel trip;
@@ -1152,6 +1171,7 @@ class _BookingConfirmationDialog extends StatefulWidget {
   final List<TextEditingController> passengerNameControllers;
   final List<TextEditingController> passengerContactControllers;
   final Future<void> Function() onLoginRequested;
+  final List<AdditionalServiceDocument> additionalServices;
 
   @override
   State<_BookingConfirmationDialog> createState() => _BookingConfirmationDialogState();
@@ -1262,7 +1282,11 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => const _ConfortOptionsSheet(),
+      builder: (_) => _ConfortOptionsSheet(
+        segmentFrom: widget.segment.departureNode.address,
+        segmentTo: widget.segment.arrivalNode.address,
+        additionalServices: widget.additionalServices,
+      ),
     );
     // null means dismissed without confirming
     if (selectedOptions == null || !mounted) return;
@@ -3377,8 +3401,23 @@ const List<_ConfortOption> _kConfortOptions = <_ConfortOption>[
   _ConfortOption(id: 'smart_food',  label: 'Smart food (eau + sandwich)', icon: Icons.lunch_dining_rounded, price: 500),
 ];
 
+// Maps _ConfortOption.id → (AdditionalServiceType firestoreId, uses segmentFrom?)
+const Map<String, (String, bool)> _kOptionCoverageMap = <String, (String, bool)>{
+  'depot_gare':  ('domicile_gare',  true),   // check segmentFrom
+  'gare_maison': ('gare_maison',    false),  // check segmentTo
+  'smart_food':  ('kit_alimentaire', true),  // check segmentFrom
+};
+
 class _ConfortOptionsSheet extends StatefulWidget {
-  const _ConfortOptionsSheet();
+  const _ConfortOptionsSheet({
+    this.segmentFrom = '',
+    this.segmentTo = '',
+    this.additionalServices = const <AdditionalServiceDocument>[],
+  });
+
+  final String segmentFrom;
+  final String segmentTo;
+  final List<AdditionalServiceDocument> additionalServices;
 
   @override
   State<_ConfortOptionsSheet> createState() => _ConfortOptionsSheetState();
@@ -3388,6 +3427,21 @@ class _ConfortOptionsSheetState extends State<_ConfortOptionsSheet> {
   final Set<String> _selected = <String>{};
   // stores home address when gare_maison is selected
   String? _homeAddress;
+
+  /// Returns true if the option is available in the departure/arrival city.
+  /// When additionalServices is empty (not yet loaded / error), all options are shown enabled.
+  bool _isCovered(_ConfortOption opt) {
+    if (widget.additionalServices.isEmpty) return true;
+    final (String firestoreId, bool useFrom) =
+        _kOptionCoverageMap[opt.id] ?? ('', true);
+    if (firestoreId.isEmpty) return true;
+    final AdditionalServiceDocument? svc = widget.additionalServices
+        .cast<AdditionalServiceDocument?>()
+        .firstWhere((s) => s!.type.firestoreId == firestoreId, orElse: () => null);
+    if (svc == null) return false;
+    final String address = useFrom ? widget.segmentFrom : widget.segmentTo;
+    return svc.coversAddress(address);
+  }
 
   Future<void> _handleOptionTap(_ConfortOption opt) async {
     final bool wasSelected = _selected.contains(opt.id);
@@ -3473,82 +3527,89 @@ class _ConfortOptionsSheetState extends State<_ConfortOptionsSheet> {
             final _ConfortOption opt = _kConfortOptions[i];
             final bool selected = _selected.contains(opt.id);
             final bool isGareMaison = opt.id == 'gare_maison';
+            final bool covered = _isCovered(opt);
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: GestureDetector(
-                onTap: () => _handleOptionTap(opt),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: selected ? _travelAccentSoft : const Color(0xFFF8FAFB),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: selected ? _travelAccentDark : const Color(0xFFE2E8F0), width: selected ? 1.5 : 1),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 36, height: 36,
-                            decoration: BoxDecoration(
-                              color: selected ? _travelAccentDark : const Color(0xFFE8EDF5),
-                              borderRadius: BorderRadius.circular(10),
+              child: Opacity(
+                opacity: covered ? 1.0 : 0.45,
+                child: GestureDetector(
+                  onTap: covered ? () => _handleOptionTap(opt) : null,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: selected ? _travelAccentSoft : const Color(0xFFF8FAFB),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: selected ? _travelAccentDark : const Color(0xFFE2E8F0), width: selected ? 1.5 : 1),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 36, height: 36,
+                              decoration: BoxDecoration(
+                                color: selected ? _travelAccentDark : const Color(0xFFE8EDF5),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(opt.icon, size: 18, color: selected ? Colors.white : const Color(0xFF5B647A)),
                             ),
-                            child: Icon(opt.icon, size: 18, color: selected ? Colors.white : const Color(0xFF5B647A)),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(opt.label, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: selected ? _travelAccentDark : const Color(0xFF10233E))),
+                                  if (!covered)
+                                    const Text('Non disponible dans votre ville', style: TextStyle(fontSize: 11, color: Color(0xFF9AA5B4)))
+                                  else if (opt.price != null)
+                                    Text('${opt.price} XOF', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? _travelAccentDark : const Color(0xFF7A8CA8)))
+                                  else if (!selected && isGareMaison)
+                                    const Text('Adresse requise', style: TextStyle(fontSize: 11, color: Color(0xFF9AA5B4))),
+                                ],
+                              ),
+                            ),
+                            if (covered)
+                              AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 180),
+                                child: selected
+                                    ? const Icon(Icons.check_circle_rounded, color: _travelAccentDark, key: ValueKey('checked'))
+                                    : const Icon(Icons.radio_button_unchecked_rounded, color: Color(0xFFD1D9E6), key: ValueKey('unchecked')),
+                              ),
+                          ],
+                        ),
+                        // address display
+                        if (isGareMaison && selected && _homeAddress != null) ...[
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: _travelAccentDark.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
                               children: [
-                                Text(opt.label, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: selected ? _travelAccentDark : const Color(0xFF10233E))),
-                                if (opt.price != null)
-                                  Text('${opt.price} XOF', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? _travelAccentDark : const Color(0xFF7A8CA8)))
-                                else if (!selected && isGareMaison)
-                                  const Text('Adresse requise', style: TextStyle(fontSize: 11, color: Color(0xFF9AA5B4))),
+                                const Icon(Icons.location_on_rounded, size: 14, color: _travelAccentDark),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    _homeAddress!,
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF10233E)),
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () => _handleOptionTap(opt),
+                                  child: const Icon(Icons.edit_rounded, size: 14, color: Color(0xFF7A8CA8)),
+                                ),
                               ],
                             ),
                           ),
-                          AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 180),
-                            child: selected
-                                ? const Icon(Icons.check_circle_rounded, color: _travelAccentDark, key: ValueKey('checked'))
-                                : const Icon(Icons.radio_button_unchecked_rounded, color: Color(0xFFD1D9E6), key: ValueKey('unchecked')),
-                          ),
                         ],
-                      ),
-                      // address display
-                      if (isGareMaison && selected && _homeAddress != null) ...[
-                        const SizedBox(height: 8),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: _travelAccentDark.withValues(alpha: 0.3)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.location_on_rounded, size: 14, color: _travelAccentDark),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  _homeAddress!,
-                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF10233E)),
-                                ),
-                              ),
-                              GestureDetector(
-                                onTap: () => _handleOptionTap(opt),
-                                child: const Icon(Icons.edit_rounded, size: 14, color: Color(0xFF7A8CA8)),
-                              ),
-                            ],
-                          ),
-                        ),
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
