@@ -18,15 +18,25 @@ class ScratchService {
 
   // ── Lectures ponctuelles (get) ────────────────────────────────────────────────
 
-  /// Retourne la première campagne active — accessible sans authentification.
+  /// Retourne la première campagne active affichable sur la home.
+  /// Accessible sans authentification.
   Future<ScratchCampaign?> fetchActiveCampaign() async {
     final QuerySnapshot<Map<String, dynamic>> snap = await _db
         .collection('scratchCampaigns')
         .where('isActive', isEqualTo: true)
+        .where('showOnHomepage', isEqualTo: true)
         .limit(1)
         .get();
     if (snap.docs.isEmpty) return null;
     return ScratchCampaign.fromFirestore(snap.docs.first);
+  }
+
+  /// Retourne une campagne par son id. Accessible sans authentification.
+  Future<ScratchCampaign?> fetchCampaignById(String campaignId) async {
+    final DocumentSnapshot<Map<String, dynamic>> doc =
+        await _db.collection('scratchCampaigns').doc(campaignId).get();
+    if (!doc.exists) return null;
+    return ScratchCampaign.fromFirestore(doc);
   }
 
   Future<List<UserScratchCard>> fetchPendingCards() async {

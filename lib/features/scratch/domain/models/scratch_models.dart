@@ -3,13 +3,34 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 // ── ScratchCampaign ────────────────────────────────────────────────────────────
 
 class ScratchCampaign {
-  const ScratchCampaign({required this.id});
+  const ScratchCampaign({
+    required this.id,
+    this.showOnHomepage = false,
+    this.maxGlobalRewards,
+    this.departureLocation,
+    this.arrivalLocation,
+  });
+
   final String id;
+  final bool showOnHomepage;
+  final int? maxGlobalRewards;
+  final String? departureLocation;
+  final String? arrivalLocation;
+
+  bool get hasRoute => departureLocation != null && arrivalLocation != null;
 
   factory ScratchCampaign.fromFirestore(
     DocumentSnapshot<Map<String, dynamic>> doc,
-  ) =>
-      ScratchCampaign(id: doc.id);
+  ) {
+    final Map<String, dynamic> d = doc.data() ?? {};
+    return ScratchCampaign(
+      id: doc.id,
+      showOnHomepage: d['showOnHomepage'] as bool? ?? false,
+      maxGlobalRewards: (d['maxGlobalRewards'] as num?)?.toInt(),
+      departureLocation: d['departureLocation'] as String?,
+      arrivalLocation: d['arrivalLocation'] as String?,
+    );
+  }
 }
 
 // ── CardStatus ─────────────────────────────────────────────────────────────────

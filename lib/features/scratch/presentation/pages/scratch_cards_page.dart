@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:scratcher/scratcher.dart';
+import 'package:govipservices/features/scratch/data/scratch_service.dart';
 import 'package:govipservices/features/scratch/domain/models/scratch_models.dart';
 import 'package:govipservices/features/scratch/presentation/state/scratch_cubit.dart';
 
@@ -188,9 +189,17 @@ class _ScratchCardState extends State<_ScratchCard> {
     // Cadeau → reste (historique)
   }
 
-  void _showRewardSheet() {
+  Future<void> _showRewardSheet() async {
     final String? rewardId = _result?.rewardId ?? widget.card.rewardId;
     if (rewardId == null) return;
+
+    ScratchCampaign? campaign;
+    try {
+      campaign = await ScratchService.instance
+          .fetchCampaignById(widget.card.campaignId);
+    } catch (_) {}
+
+    if (!mounted) return;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -201,6 +210,8 @@ class _ScratchCardState extends State<_ScratchCard> {
         value: _result?.rewardValue ?? widget.card.rewardValue,
         isUsed: widget.isUsed,
         expiresAt: widget.card.expiresAt,
+        departureLocation: campaign?.departureLocation,
+        arrivalLocation: campaign?.arrivalLocation,
       ),
     );
   }
@@ -682,6 +693,8 @@ class _RewardSheet extends StatefulWidget {
     required this.isUsed,
     this.value,
     this.expiresAt,
+    this.departureLocation,
+    this.arrivalLocation,
   });
 
   final String rewardId;
@@ -689,6 +702,8 @@ class _RewardSheet extends StatefulWidget {
   final double? value;
   final bool isUsed;
   final DateTime? expiresAt;
+  final String? departureLocation;
+  final String? arrivalLocation;
 
   @override
   State<_RewardSheet> createState() => _RewardSheetState();
@@ -763,6 +778,31 @@ class _RewardSheetState extends State<_RewardSheet> {
           // Séparateur
           Divider(color: Colors.white.withValues(alpha: 0.08)),
           const SizedBox(height: 16),
+          // Trajet si défini
+          if (widget.departureLocation != null && widget.arrivalLocation != null) ...<Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.route_rounded, size: 14, color: Colors.white.withValues(alpha: 0.45)),
+                const SizedBox(width: 6),
+                Text(
+                  'Utilisable sur ',
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 12),
+                ),
+                Expanded(
+                  child: Text(
+                    '${widget.departureLocation} → ${widget.arrivalLocation}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
           // Statut + expiration
           Row(
             children: <Widget>[
