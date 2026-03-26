@@ -51,6 +51,24 @@ Etat :
 - feature encore plus legere que `travel`
 - prevue pour reutiliser aussi le systeme de notifications transverse
 
+### `scratch`
+
+Fonctionnalites principales :
+
+- attribution de cartes a gratter depuis des triggers backend
+- revelation serveur d'une reward par tirage pondere
+- consultation et redemption des rewards cote app
+
+Regles metier importantes :
+
+- le tirage utilise `reward.weight` comme poids relatif et non comme pourcentage fixe
+- une carte attribuee expire actuellement au bout de `30 jours`
+- une reward utilisateur peut porter un `expiresAt`, mais aucune expiration par defaut n'est renseignee aujourd'hui a sa creation
+
+Voir aussi :
+
+- [Scratch cards et rewards](./scratch.md)
+
 ### `user`
 
 Fonctionnalites principales :

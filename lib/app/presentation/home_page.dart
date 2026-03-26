@@ -13,6 +13,9 @@ import 'package:govipservices/features/travel/domain/models/trip_detail_models.d
 import 'package:govipservices/features/travel/presentation/pages/my_trips_page.dart';
 import 'package:govipservices/features/user/data/user_availability_service.dart';
 import 'package:govipservices/shared/services/safe_wakelock_service.dart';
+import 'package:govipservices/features/scratch/data/scratch_service.dart';
+import 'package:govipservices/features/scratch/domain/models/scratch_models.dart';
+import 'package:govipservices/features/scratch/presentation/pages/scratch_launch_sheet.dart';
 import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
 
 const double _topPanelMaxExtent = 424;
@@ -143,6 +146,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _loadVehicleTypes();
     _loadCompanies();
     _syncWakeLock();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkScratchCard());
+  }
+
+  Future<void> _checkScratchCard() async {
+    try {
+      final bool isAuth = FirebaseAuth.instance.currentUser != null;
+      if (isAuth) {
+        final List<UserScratchCard> cards =
+            await ScratchService.instance.fetchPendingCards();
+        if (!mounted || cards.isEmpty) return;
+        await showScratchLaunchSheet(
+          context,
+          card: cards.first,
+          isAuthenticated: true,
+        );
+      } else {
+        final ScratchCampaign? campaign =
+            await ScratchService.instance.fetchActiveCampaign();
+        if (!mounted || campaign == null) return;
+        await showScratchLaunchSheet(
+          context,
+          isAuthenticated: false,
+        );
+      }
+    } catch (_) {
+      // Non-bloquant
+    }
   }
 
   Future<void> _loadVehicleTypes() async {
@@ -423,6 +453,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         leading: const HomeAppBarButton(),
         title: const Text('GVIP'),
         actions: <Widget>[
+          IconButton(
+            tooltip: 'Cartes à gratter',
+            onPressed: () => Navigator.of(context).pushNamed(AppRoutes.scratchCards),
+            icon: const Icon(Icons.card_giftcard_rounded),
+          ),
           const NotificationsAppBarButton(),
           Padding(
             padding: const EdgeInsets.only(right: 8),

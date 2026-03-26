@@ -19,6 +19,7 @@ import 'package:govipservices/features/user/presentation/pages/forgot_password_p
 import 'package:govipservices/features/user/presentation/pages/login_page.dart';
 import 'package:govipservices/features/user/presentation/pages/account_page.dart';
 import 'package:govipservices/features/wallet/presentation/pages/wallet_page.dart';
+import 'package:govipservices/features/scratch/presentation/pages/scratch_cards_page.dart';
 
 class AppRouter {
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -130,6 +131,11 @@ class AppRouter {
       case AppRoutes.wallet:
         return MaterialPageRoute<void>(
           builder: (_) => const WalletPage(),
+          settings: settings,
+        );
+      case AppRoutes.scratchCards:
+        return MaterialPageRoute<void>(
+          builder: (_) => const ScratchCardsPage(),
           settings: settings,
         );
       default:

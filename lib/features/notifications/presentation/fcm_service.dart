@@ -66,21 +66,36 @@ class FcmService {
     await _initializeLocalNotifications();
 
     _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) async {
-      await _syncCurrentTokenForUser(user);
+      try {
+        await _syncCurrentTokenForUser(user);
+      } catch (error, stackTrace) {
+        debugPrint('FCM auth sync skipped: $error');
+        debugPrintStack(stackTrace: stackTrace);
+      }
     });
 
     _tokenRefreshSubscription = _messaging.onTokenRefresh.listen((token) async {
-      final User? user = FirebaseAuth.instance.currentUser;
-      final String installationId =
-          await _pushTokenRepository.getOrCreateInstallationId();
-      await _syncTokenBinding(
-        installationId: installationId,
-        token: token,
-        currentUserId: user?.uid,
-      );
+      try {
+        final User? user = FirebaseAuth.instance.currentUser;
+        final String installationId =
+            await _pushTokenRepository.getOrCreateInstallationId();
+        await _syncTokenBinding(
+          installationId: installationId,
+          token: token,
+          currentUserId: user?.uid,
+        );
+      } catch (error, stackTrace) {
+        debugPrint('FCM token refresh sync skipped: $error');
+        debugPrintStack(stackTrace: stackTrace);
+      }
     });
 
-    await _syncCurrentTokenForUser(FirebaseAuth.instance.currentUser);
+    try {
+      await _syncCurrentTokenForUser(FirebaseAuth.instance.currentUser);
+    } catch (error, stackTrace) {
+      debugPrint('FCM initial token sync skipped: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
 
     _foregroundMessageSubscription = FirebaseMessaging.onMessage.listen(
       _handleForegroundMessage,
@@ -179,19 +194,24 @@ class FcmService {
   }) async {
     final String normalizedCurrentUserId = (currentUserId ?? '').trim();
 
-    if (normalizedCurrentUserId.isNotEmpty) {
+    try {
+      if (normalizedCurrentUserId.isNotEmpty) {
+        await _pushTokenRepository.upsertInstallation(
+          installationId: installationId,
+          token: token,
+          userId: normalizedCurrentUserId,
+        );
+        return;
+      }
+
       await _pushTokenRepository.upsertInstallation(
         installationId: installationId,
         token: token,
-        userId: normalizedCurrentUserId,
       );
-      return;
+    } catch (error, stackTrace) {
+      debugPrint('FCM token binding skipped: $error');
+      debugPrintStack(stackTrace: stackTrace);
     }
-
-    await _pushTokenRepository.upsertInstallation(
-      installationId: installationId,
-      token: token,
-    );
   }
 
   Future<void> _handleOpenedMessage(RemoteMessage message) async {

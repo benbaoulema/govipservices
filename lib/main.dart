@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -30,8 +32,13 @@ Future<void> main() async {
     debugPrint('Firebase init skipped: $error');
     debugPrintStack(stackTrace: stackTrace);
   }
-  if (firebaseReady) {
-    await FcmService.instance.initialize();
-  }
   runApp(const GoVipApp());
+  if (firebaseReady) {
+    unawaited(
+      FcmService.instance.initialize().catchError((Object error, StackTrace stackTrace) {
+        debugPrint('FCM init skipped: $error');
+        debugPrintStack(stackTrace: stackTrace);
+      }),
+    );
+  }
 }

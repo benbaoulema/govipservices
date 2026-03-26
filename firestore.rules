@@ -1,0 +1,64 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    // ── Collections existantes (règles à affiner selon les besoins) ────────────
+    // Notifications, users, bookings, parcels, etc.
+    match /{collection}/{document=**} {
+      allow read, write: if isAuth();
+    }
+
+    // ── FCM : tokens enregistrés avant authentification ────────────────────────
+    // pushInstallations et userPushTokens peuvent être écrits avant login
+    match /pushInstallations/{installationId} {
+      allow read, write: if true;
+    }
+    match /userPushTokens/{userId}/tokens/{tokenId} {
+      allow read, write: if true;
+    }
+
+    // ── Scratch card system ────────────────────────────────────────────────────
+
+    // Campagnes : lecture publique (teaser pour non-connectés)
+    // Écriture réservée au backend (Admin SDK, bypasse les rules)
+    match /scratchCampaigns/{campaignId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Cartes d'un user : lecture par le propriétaire uniquement
+    // Écriture par le backend uniquement (revealScratchCard, evaluateCampaigns)
+    match /user_scratch_cards/{uid}/cards/{cardId} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // Récompenses d'un user : lecture par le propriétaire uniquement
+    match /user_rewards/{uid}/rewards/{rewardId} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // Historique des échanges : lecture par le propriétaire uniquement
+    match /reward_redemptions/{redemptionId} {
+      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Trigger events : lecture/écriture par le propriétaire
+    // (le client peut écrire des events custom si nécessaire)
+    match /user_trigger_events/{uid}/events/{trigger} {
+      allow read, write: if isOwner(uid);
+    }
+  }
+}

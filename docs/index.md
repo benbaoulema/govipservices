@@ -12,6 +12,7 @@ Point d'entree de la documentation projet.
 - [Travel](./travel.md)
 - [Parcels](./parcels.md)
 - [User](./user.md)
+- [Scratch cards et rewards](./scratch.md)
 - [Notifications et FCM](./notifications.md)
 - [Disponibilite et presence](./availability.md)
 

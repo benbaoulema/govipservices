@@ -225,6 +225,12 @@ class _DrawerSheet extends StatelessWidget {
                     subtitle: 'Solde & transactions',
                     onTap: () => _navigate(context, AppRoutes.wallet),
                   ),
+                  _DrawerItem(
+                    icon: Icons.auto_awesome_rounded,
+                    label: 'Cartes à gratter',
+                    subtitle: 'Récompenses & offres',
+                    onTap: () => _navigate(context, AppRoutes.scratchCards),
+                  ),
                   _DrawerDivider(),
                   _DrawerItem(
                     icon: Icons.person_outline_rounded,

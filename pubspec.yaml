@@ -57,6 +57,8 @@ dependencies:
   qr_flutter: ^4.1.0
   pdf: ^3.11.1
   printing: ^5.13.2
+  cloud_functions: ^6.0.6
+  scratcher: ^2.4.0
 
 dev_dependencies:
   flutter_test:
