@@ -87,6 +87,7 @@ class TripDetailModel {
     required this.options,
     required this.intermediateStops,
     required this.status,
+    this.isBus = false,
   });
 
   final String id;
@@ -106,6 +107,7 @@ class TripDetailModel {
   final TripOptionsModel options;
   final List<TripStopModel> intermediateStops;
   final String status;
+  final bool isBus;
 }
 
 class TripRouteNode {

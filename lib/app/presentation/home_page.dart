@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:govipservices/app/presentation/widgets/home_availability_panel.dart';
 import 'package:govipservices/features/parcels/data/vehicle_type_repository.dart';
@@ -59,6 +61,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   VehicleType? _selectedVehicleType;
   List<TransportCompany> _companies = const <TransportCompany>[];
   bool _companiesLoading = true;
+  StreamSubscription<User?>? _authSubscription;
+  User? _previousAuthUser;
 
   static const List<HomeMenuItem> _travelItems = [
     HomeMenuItem(
@@ -147,6 +151,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _loadCompanies();
     _syncWakeLock();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkScratchCard());
+    _previousAuthUser = FirebaseAuth.instance.currentUser;
+    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((User? user) {
+      if (user != null && _previousAuthUser == null) {
+        _checkScratchCard();
+      }
+      _previousAuthUser = user;
+    });
   }
 
   Future<void> _checkScratchCard() async {
@@ -191,6 +202,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _authSubscription?.cancel();
     SafeWakelockService.setEnabled(false);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();

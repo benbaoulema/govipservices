@@ -171,6 +171,15 @@ class _ScratchCardState extends State<_ScratchCard> {
     final RevealResult? result = await widget.cubit.revealCard(widget.card.id);
     if (!mounted) return;
 
+    if (widget.cubit.lastRevealWasAlreadyProcessed) {
+      setState(() {
+        _loading = false;
+        _dismissing = true;
+      });
+      await Future.delayed(const Duration(milliseconds: 300));
+      return;
+    }
+
     setState(() {
       _loading = false;
       _localRevealed = true;
@@ -207,7 +216,12 @@ class _ScratchCardState extends State<_ScratchCard> {
       builder: (_) => _RewardSheet(
         rewardId: rewardId,
         label: _result?.rewardLabel ?? widget.card.rewardLabel ?? '',
-        value: _result?.rewardValue ?? widget.card.rewardValue,
+        value: widget.cubit.availableRewards
+                .where((r) => r.id == rewardId)
+                .map((r) => r.effectiveValue)
+                .firstOrNull ??
+            _result?.rewardValue ??
+            widget.card.rewardValue,
         isUsed: widget.isUsed,
         expiresAt: widget.card.expiresAt,
         departureLocation: campaign?.departureLocation,
@@ -228,6 +242,12 @@ class _ScratchCardState extends State<_ScratchCard> {
                 card: widget.card,
                 result: _result,
                 isUsed: widget.isUsed,
+                liveEffectiveValue: widget.card.rewardId != null
+                    ? widget.cubit.availableRewards
+                        .where((r) => r.id == widget.card.rewardId)
+                        .map((r) => r.effectiveValue)
+                        .firstOrNull
+                    : null,
               ),
             )
           : Stack(
@@ -277,17 +297,19 @@ class _CardRevealed extends StatelessWidget {
     required this.card,
     required this.isUsed,
     this.result,
+    this.liveEffectiveValue,
   });
 
   final UserScratchCard card;
   final RevealResult? result;
   final bool isUsed;
+  final double? liveEffectiveValue;
 
   String get _label =>
       result?.rewardLabel ?? card.rewardLabel ?? '';
 
   double? get _value =>
-      result?.rewardValue ?? card.rewardValue;
+      liveEffectiveValue ?? result?.rewardValue ?? card.rewardValue;
 
   bool get _isNothing =>
       (result?.isNothing ?? false) ||
@@ -345,7 +367,7 @@ class _CardRevealed extends StatelessWidget {
                   Padding(
                     padding: EdgeInsets.only(top: valueTop),
                     child: Text(
-                      '${_value!.toStringAsFixed(0)} XOF',
+                      'Solde : ${_value!.toStringAsFixed(0)} XOF',
                       style: TextStyle(
                         color: _kGold.withValues(alpha: 0.85),
                         fontSize: valueFontSize,

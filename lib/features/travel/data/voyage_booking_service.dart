@@ -72,6 +72,44 @@ class VoyageBookingService {
       );
       final String bookingTrackNum = _generateTrackingNumber();
 
+      // ── Reward FIFO consumption ────────────────────────────────────────────
+      int discountAmount = 0;
+      if (input.appliedRewardIds.isNotEmpty && (input.requesterUid ?? '').trim().isNotEmpty) {
+        final String uid = input.requesterUid!.trim();
+        // Read all reward docs first (reads must precede writes in a transaction)
+        final List<DocumentReference<Map<String, dynamic>>> rewardRefs = input.appliedRewardIds
+            .map((id) => _firestore.doc('user_rewards/$uid/rewards/$id'))
+            .toList(growable: false);
+        final List<DocumentSnapshot<Map<String, dynamic>>> rewardSnaps =
+            await Future.wait(rewardRefs.map((r) => transaction.get(r)));
+
+        int remaining = totalPrice;
+        for (int i = 0; i < rewardSnaps.length; i++) {
+          if (remaining <= 0) break;
+          final DocumentSnapshot<Map<String, dynamic>> snap = rewardSnaps[i];
+          if (!snap.exists || snap.data() == null) continue;
+          final Map<String, dynamic> rData = snap.data()!;
+          if ((rData['status'] as String? ?? '') != 'available') continue;
+          final double effectiveValue =
+              (rData['remainingValue'] as num? ?? rData['value'] as num? ?? 0).toDouble();
+          if (effectiveValue <= 0) continue;
+          final int consumed = effectiveValue.round().clamp(0, remaining);
+          discountAmount += consumed;
+          remaining -= consumed;
+          if (consumed >= effectiveValue.round()) {
+            transaction.update(rewardRefs[i], <String, dynamic>{
+              'status': 'used',
+              'usedAt': FieldValue.serverTimestamp(),
+              'remainingValue': 0,
+            });
+          } else {
+            transaction.update(rewardRefs[i], <String, dynamic>{
+              'remainingValue': effectiveValue - consumed,
+            });
+          }
+        }
+      }
+
       bookingMap = <String, dynamic>{
         'trackNum': bookingTrackNum,
         'tripId': input.tripId,
@@ -102,6 +140,12 @@ class VoyageBookingService {
         'totalPrice': totalPrice,
         'travelers': input.travelers.map((t) => t.toMap()).toList(growable: false),
         'comfortOptions': input.comfortOptions,
+        if (input.appliedRewardIds.isNotEmpty)
+          'appliedRewardIds': input.appliedRewardIds,
+        if (discountAmount > 0)
+          'discountAmount': discountAmount,
+        if (input.studentDiscount > 0)
+          'studentDiscount': input.studentDiscount,
         'unreadForDriver': 0,
         'unreadForPassenger': 0,
         'status': 'pending',

@@ -61,6 +61,7 @@ class TripDetailRepositoryImpl implements TripDetailRepository {
       ),
       intermediateStops: stops,
       status: _str(raw['status']).isEmpty ? 'published' : _str(raw['status']),
+      isBus: raw['isBus'] == true,
     );
   }
 

@@ -16,6 +16,7 @@ class ScratchCubit extends ChangeNotifier {
   String? _error;
   bool _isRevealing = false;
   bool _isRedeeming = false;
+  bool _lastRevealWasAlreadyProcessed = false;
 
   List<UserScratchCard> get pendingCards => _pendingCards;
   List<UserScratchCard> get revealedCards => _revealedCards;
@@ -24,6 +25,7 @@ class ScratchCubit extends ChangeNotifier {
   String? get error => _error;
   bool get isRevealing => _isRevealing;
   bool get isRedeeming => _isRedeeming;
+  bool get lastRevealWasAlreadyProcessed => _lastRevealWasAlreadyProcessed;
 
   Future<void> load() async {
     _isLoading = true;
@@ -43,11 +45,18 @@ class ScratchCubit extends ChangeNotifier {
   Future<RevealResult?> revealCard(String cardId) async {
     _isRevealing = true;
     _error = null;
+    _lastRevealWasAlreadyProcessed = false;
     notifyListeners();
     try {
       final RevealResult result = await _service.revealCard(cardId);
+      await _refresh();
       return result;
     } catch (e) {
+      if (_service.isCardAlreadyProcessedError(e)) {
+        _lastRevealWasAlreadyProcessed = true;
+        await _refresh();
+        return null;
+      }
       _error = e.toString();
       notifyListeners();
       return null;

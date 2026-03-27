@@ -1,5 +1,35 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// ── RewardConfig ───────────────────────────────────────────────────────────────
+
+class RewardConfig {
+  const RewardConfig({
+    required this.id,
+    required this.type,
+    required this.label,
+    required this.weight,
+    this.value,
+  });
+
+  final String id;
+  final String type;
+  final String label;
+  final int weight;
+  final double? value;
+
+  bool get isNothing => type == 'nothing';
+
+  factory RewardConfig.fromMap(Map<String, dynamic> m) {
+    return RewardConfig(
+      id: m['id'] as String? ?? '',
+      type: m['type'] as String? ?? 'nothing',
+      label: m['label'] as String? ?? '',
+      weight: (m['weight'] as num? ?? 0).toInt(),
+      value: (m['value'] as num?)?.toDouble(),
+    );
+  }
+}
+
 // ── ScratchCampaign ────────────────────────────────────────────────────────────
 
 class ScratchCampaign {
@@ -9,6 +39,8 @@ class ScratchCampaign {
     this.maxGlobalRewards,
     this.departureLocation,
     this.arrivalLocation,
+    this.targetAudience,
+    this.rewardsPool = const <RewardConfig>[],
   });
 
   final String id;
@@ -16,8 +48,11 @@ class ScratchCampaign {
   final int? maxGlobalRewards;
   final String? departureLocation;
   final String? arrivalLocation;
+  final String? targetAudience;
+  final List<RewardConfig> rewardsPool;
 
   bool get hasRoute => departureLocation != null && arrivalLocation != null;
+  bool get isForStudents => targetAudience == 'students';
 
   factory ScratchCampaign.fromFirestore(
     DocumentSnapshot<Map<String, dynamic>> doc,
@@ -29,6 +64,12 @@ class ScratchCampaign {
       maxGlobalRewards: (d['maxGlobalRewards'] as num?)?.toInt(),
       departureLocation: d['departureLocation'] as String?,
       arrivalLocation: d['arrivalLocation'] as String?,
+      targetAudience: d['targetAudience'] as String?,
+      rewardsPool: (d['rewardsPool'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((e) => RewardConfig.fromMap(Map<String, dynamic>.from(e)))
+          .where((r) => r.weight > 0)
+          .toList(growable: false),
     );
   }
 }
@@ -133,6 +174,8 @@ class UserReward {
     required this.status,
     required this.earnedAt,
     this.value,
+    this.remainingValue,
+    this.serviceScope,
     this.expiresAt,
     this.usedAt,
   });
@@ -143,10 +186,27 @@ class UserReward {
   final String type;
   final String label;
   final double? value;
+  /// Montant restant après utilisations partielles. Géré par le backend.
+  final double? remainingValue;
+  /// Ex: "transport", "parcels". Null = applicable partout.
+  final String? serviceScope;
   final RewardStatus status;
   final DateTime earnedAt;
   final DateTime? expiresAt;
   final DateTime? usedAt;
+
+  /// Valeur effective utilisable : remainingValue en priorité, sinon value.
+  double get effectiveValue => remainingValue ?? value ?? 0;
+
+  bool get isExpiredReward =>
+      expiresAt != null && DateTime.now().isAfter(expiresAt!);
+
+  bool get isEligibleForTransport =>
+      !isNothing &&
+      !isExpiredReward &&
+      status == RewardStatus.available &&
+      type == 'discount_fixed' &&
+      (serviceScope == null || serviceScope!.contains('transport'));
 
   factory UserReward.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final Map<String, dynamic> d = doc.data() ?? {};
@@ -157,6 +217,8 @@ class UserReward {
       type: d['type'] as String? ?? 'nothing',
       label: d['label'] as String? ?? '',
       value: (d['value'] as num?)?.toDouble(),
+      remainingValue: (d['remainingValue'] as num?)?.toDouble(),
+      serviceScope: d['serviceScope'] as String?,
       status: RewardStatus.fromString(d['status'] as String?),
       earnedAt: (d['earnedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       expiresAt: (d['expiresAt'] as Timestamp?)?.toDate(),

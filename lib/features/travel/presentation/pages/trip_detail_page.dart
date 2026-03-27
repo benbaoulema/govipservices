@@ -21,6 +21,9 @@ import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/shared/services/location_service.dart';
 import 'package:govipservices/features/travel/data/additional_service_repository.dart';
 import 'package:govipservices/features/travel/domain/models/additional_service_models.dart';
+import 'package:govipservices/features/scratch/data/scratch_service.dart';
+import 'package:govipservices/features/scratch/domain/models/scratch_models.dart';
+import 'package:govipservices/features/scratch/presentation/pages/student_scratch_sheet.dart';
 
 const Color _travelAccent = Color(0xFF14B8A6);
 const Color _travelAccentDark = Color(0xFF0F766E);
@@ -1307,7 +1310,18 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
         ? widget.passengerContactControllers.first.text.trim()
         : (widget.authUser?.phoneNumber ?? '').trim();
 
-    final bool? paymentConfirmed = await showModalBottomSheet<bool>(
+    // Fetch eligible rewards for bus trips
+    List<UserReward> eligibleRewards = const <UserReward>[];
+    if (widget.trip.isBus && widget.authUser != null) {
+      try {
+        eligibleRewards = await ScratchService.instance.fetchEligibleRewardsForTransport();
+      } catch (e) {
+        debugPrint('[Rewards] fetchEligibleRewardsForTransport error: $e');
+      }
+    }
+    if (!mounted) return;
+
+    final _PaymentResult? paymentResult = await showModalBottomSheet<_PaymentResult>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1321,9 +1335,10 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
         totalAmount: paymentTotal,
         currency: widget.trip.currency.isEmpty ? 'XOF' : widget.trip.currency,
         userPhone: prefillPhone,
+        eligibleRewards: eligibleRewards,
       ),
     );
-    if (paymentConfirmed != true || !mounted) return;
+    if (paymentResult == null || !mounted) return;
 
     setState(() {
       _errorText = null;
@@ -1343,6 +1358,8 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
           idempotencyKey: _submissionKey,
           effectiveDepartureDate: widget.displayDate,
           comfortOptions: selectedOptions,
+          appliedRewardIds: eligibleRewards.map((r) => r.id).toList(growable: false),
+          studentDiscount: paymentResult.studentDiscount,
           segmentFrom: widget.segment.departureNode.address,
           segmentTo: widget.segment.arrivalNode.address,
           segmentPrice: widget.segment.segmentPrice,
@@ -3778,6 +3795,11 @@ class _HomeAddressSheetState extends State<_HomeAddressSheet> {
 
 // ── Payment Sheet ───────────────────────────────────────────────────────────
 
+class _PaymentResult {
+  const _PaymentResult({this.studentDiscount = 0});
+  final int studentDiscount;
+}
+
 enum _PaymentMethod { wave, orangeMoney }
 
 class _PaymentSheet extends StatefulWidget {
@@ -3785,11 +3807,13 @@ class _PaymentSheet extends StatefulWidget {
     required this.totalAmount,
     required this.currency,
     required this.userPhone,
+    this.eligibleRewards = const <UserReward>[],
   });
 
   final int totalAmount;
   final String currency;
   final String userPhone;
+  final List<UserReward> eligibleRewards;
 
   @override
   State<_PaymentSheet> createState() => _PaymentSheetState();
@@ -3798,17 +3822,241 @@ class _PaymentSheet extends StatefulWidget {
 class _PaymentSheetState extends State<_PaymentSheet> {
   _PaymentMethod? _method;
   late final TextEditingController _phoneController;
+  late final TextEditingController _matriculeController;
+
+  bool _isStudent = false;
+  bool _loadingStudentCampaign = false;
+  int _studentDiscount = 0;
+
+  int get _totalDiscount => widget.eligibleRewards.fold(0, (acc, r) => acc + r.effectiveValue.round());
+  int get _effectiveTotal => (widget.totalAmount - _totalDiscount - _studentDiscount).clamp(0, widget.totalAmount);
 
   @override
   void initState() {
     super.initState();
     _phoneController = TextEditingController(text: widget.userPhone);
+    _matriculeController = TextEditingController()
+      ..addListener(() => setState(() {}));
   }
 
   @override
   void dispose() {
     _phoneController.dispose();
+    _matriculeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _validateStudent() async {
+    final String matricule = _matriculeController.text.trim();
+    if (matricule.isEmpty) return;
+    setState(() => _loadingStudentCampaign = true);
+    try {
+      final ScratchCampaign? campaign = await ScratchService.instance.fetchStudentCampaign();
+      if (!mounted) return;
+      if (campaign == null || campaign.rewardsPool.isEmpty) {
+        setState(() => _loadingStudentCampaign = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Aucune campagne étudiante active pour le moment.')),
+        );
+        return;
+      }
+      setState(() => _loadingStudentCampaign = false);
+      final RewardConfig? reward = await showStudentScratchSheet(
+        context,
+        campaign: campaign,
+        matricule: matricule,
+      );
+      if (!mounted) return;
+      if (reward != null && !reward.isNothing && reward.value != null) {
+        setState(() => _studentDiscount = reward.value!.round().clamp(0, widget.totalAmount));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingStudentCampaign = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur : $e')),
+      );
+    }
+  }
+
+  Widget _buildPriceBreakdown() {
+    final bool hasDiscount = _totalDiscount > 0 || _studentDiscount > 0;
+    final String cur = widget.currency.isEmpty ? 'XOF' : widget.currency;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F8FB),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFD1D9E6)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                hasDiscount ? 'Prix normal' : 'Total à payer',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: hasDiscount ? const Color(0xFF6B7A90) : _travelAccentDark,
+                  fontWeight: hasDiscount ? FontWeight.w500 : FontWeight.w700,
+                ),
+              ),
+              Text(
+                '${widget.totalAmount} $cur',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: hasDiscount ? const Color(0xFF6B7A90) : _travelAccentDark,
+                  fontWeight: hasDiscount ? FontWeight.w500 : FontWeight.w700,
+                  decoration: hasDiscount ? TextDecoration.lineThrough : null,
+                ),
+              ),
+            ],
+          ),
+          if (hasDiscount) ...[
+            if (_totalDiscount > 0) ...[
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.card_giftcard_rounded, size: 15, color: Color(0xFF2E7D32)),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Récompenses (${widget.eligibleRewards.length})',
+                        style: const TextStyle(fontSize: 13, color: Color(0xFF2E7D32), fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                  Text('-$_totalDiscount $cur',
+                      style: const TextStyle(fontSize: 13, color: Color(0xFF2E7D32), fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ],
+            if (_studentDiscount > 0) ...[
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.school_rounded, size: 15, color: Color(0xFF00897B)),
+                      const SizedBox(width: 4),
+                      const Text('Réduction étudiante',
+                          style: TextStyle(fontSize: 13, color: Color(0xFF00897B), fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                  Text('-$_studentDiscount $cur',
+                      style: const TextStyle(fontSize: 13, color: Color(0xFF00897B), fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ],
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Divider(height: 1, color: Color(0xFFD1D9E6)),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Total à payer',
+                    style: TextStyle(fontSize: 14, color: _travelAccentDark, fontWeight: FontWeight.w800)),
+                Text('$_effectiveTotal $cur',
+                    style: const TextStyle(fontSize: 14, color: _travelAccentDark, fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStudentSection() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F8FB),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFD1D9E6)),
+      ),
+      child: Column(
+        children: [
+          SwitchListTile(
+            value: _isStudent,
+            activeColor: const Color(0xFF00897B),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+            title: const Text(
+              'Je suis élève ou étudiant(e)',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF10233E)),
+            ),
+            secondary: const Icon(Icons.school_rounded, color: Color(0xFF00897B), size: 22),
+            onChanged: _studentDiscount > 0
+                ? null
+                : (val) => setState(() {
+                      _isStudent = val;
+                      if (!val) _matriculeController.clear();
+                    }),
+          ),
+          if (_isStudent && _studentDiscount == 0) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Column(
+                children: [
+                  const Divider(height: 1, color: Color(0xFFD1D9E6)),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _matriculeController,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: InputDecoration(
+                      hintText: 'Numéro matricule',
+                      prefixIcon: const Icon(Icons.badge_rounded, size: 18),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      filled: true,
+                      fillColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF00897B),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                      ),
+                      onPressed: _loadingStudentCampaign
+                          ? null
+                          : _matriculeController.text.trim().isEmpty
+                              ? null
+                              : _validateStudent,
+                      child: _loadingStudentCampaign
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Text('Valider'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (_studentDiscount > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Color(0xFF00897B), size: 16),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Réduction étudiante appliquée : -$_studentDiscount XOF',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF00897B), fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -3851,63 +4099,26 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Paiement', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF10233E))),
-                        Text(
-                          'Total à payer : ${widget.totalAmount} ${widget.currency}',
-                          style: const TextStyle(fontSize: 13, color: _travelAccentDark, fontWeight: FontWeight.w700),
-                        ),
-                      ],
+                    child: Text(
+                      _effectiveTotal == 0 ? 'Réservation gratuite' : 'Paiement',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF10233E)),
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+
+              // Price breakdown
+              _buildPriceBreakdown(),
               const SizedBox(height: 20),
 
-              // Method selection
-              const Text('Choisir le mode de paiement',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF4A5568))),
-              const SizedBox(height: 10),
-              _PaymentMethodTile(
-                label: 'Wave',
-                subtitle: 'Paiement mobile Wave',
-                color: const Color(0xFF1A56DB),
-                imagePath: 'assets/wave.jpg',
-                selected: _method == _PaymentMethod.wave,
-                onTap: () => setState(() => _method = _PaymentMethod.wave),
-              ),
-              const SizedBox(height: 8),
-              _PaymentMethodTile(
-                label: 'Orange Money',
-                subtitle: 'Paiement mobile Orange',
-                color: const Color(0xFFFF6600),
-                imagePath: 'assets/om.png',
-                icon: Icons.account_balance_wallet_rounded,
-                selected: _method == _PaymentMethod.orangeMoney,
-                onTap: () => setState(() => _method = _PaymentMethod.orangeMoney),
-              ),
+              // Switch étudiant
+              _buildStudentSection(),
+              const SizedBox(height: 20),
 
-              // Phone field (shown once a method is selected)
-              if (_method != null) ...[
-                const SizedBox(height: 20),
-                Text(
-                  'Numéro ${_method == _PaymentMethod.wave ? "Wave" : "Orange Money"}',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF4A5568)),
-                ),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: InputDecoration(
-                    hintText: 'Ex: +225 07 00 00 00 00',
-                    prefixIcon: const Icon(Icons.phone_rounded, size: 18),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                  ),
-                ),
-                const SizedBox(height: 16),
+              // Payment method + confirm button
+              if (_effectiveTotal == 0) ...[
+                const SizedBox(height: 4),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
@@ -3918,13 +4129,71 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
                     ),
-                    onPressed: _phoneController.text.trim().isEmpty
-                        ? null
-                        : () => Navigator.of(context).pop(true),
+                    onPressed: () => Navigator.of(context).pop(_PaymentResult(studentDiscount: _studentDiscount)),
                     icon: const Icon(Icons.check_circle_rounded),
-                    label: const Text('Payer et Réserver'),
+                    label: const Text('Réserver gratuitement'),
                   ),
                 ),
+              ] else ...[
+                const Text('Choisir le mode de paiement',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF4A5568))),
+                const SizedBox(height: 10),
+                _PaymentMethodTile(
+                  label: 'Wave',
+                  subtitle: 'Paiement mobile Wave',
+                  color: const Color(0xFF1A56DB),
+                  imagePath: 'assets/wave.jpg',
+                  selected: _method == _PaymentMethod.wave,
+                  onTap: () => setState(() => _method = _PaymentMethod.wave),
+                ),
+                const SizedBox(height: 8),
+                _PaymentMethodTile(
+                  label: 'Orange Money',
+                  subtitle: 'Paiement mobile Orange',
+                  color: const Color(0xFFFF6600),
+                  imagePath: 'assets/om.png',
+                  icon: Icons.account_balance_wallet_rounded,
+                  selected: _method == _PaymentMethod.orangeMoney,
+                  onTap: () => setState(() => _method = _PaymentMethod.orangeMoney),
+                ),
+
+                // Phone field (shown once a method is selected)
+                if (_method != null) ...[
+                  const SizedBox(height: 20),
+                  Text(
+                    'Numéro ${_method == _PaymentMethod.wave ? "Wave" : "Orange Money"}',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF4A5568)),
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _phoneController,
+                    keyboardType: TextInputType.phone,
+                    decoration: InputDecoration(
+                      hintText: 'Ex: +225 07 00 00 00 00',
+                      prefixIcon: const Icon(Icons.phone_rounded, size: 18),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _travelAccent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                      ),
+                      onPressed: _phoneController.text.trim().isEmpty
+                          ? null
+                          : () => Navigator.of(context).pop(_PaymentResult(studentDiscount: _studentDiscount)),
+                      icon: const Icon(Icons.check_circle_rounded),
+                      label: const Text('Payer et Réserver'),
+                    ),
+                  ),
+                ],
               ],
             ],
           ),

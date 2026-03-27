@@ -75,9 +75,20 @@ class _ScratchLaunchSheetState extends State<_ScratchLaunchSheet> {
     RevealResult? result;
     try {
       result = await ScratchService.instance.revealCard(widget.card!.id);
-    } catch (_) {
-      result = null;
+    } catch (_) {}
+    if (!mounted) return;
+
+    if (result == null && widget.card != null) {
+      final List<UserScratchCard> pendingCards =
+          await ScratchService.instance.fetchPendingCards();
+      final bool stillPending = pendingCards.any((c) => c.id == widget.card!.id);
+      if (!mounted) return;
+      if (!stillPending) {
+        Navigator.of(context).pop();
+        return;
+      }
     }
+
     if (!mounted) return;
 
     setState(() {

@@ -31,6 +31,18 @@ class ScratchService {
     return ScratchCampaign.fromFirestore(snap.docs.first);
   }
 
+  /// Retourne la campagne active ciblant les étudiants/élèves.
+  Future<ScratchCampaign?> fetchStudentCampaign() async {
+    final QuerySnapshot<Map<String, dynamic>> snap = await _db
+        .collection('scratchCampaigns')
+        .where('isActive', isEqualTo: true)
+        .where('targetAudience', isEqualTo: 'students')
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return ScratchCampaign.fromFirestore(snap.docs.first);
+  }
+
   /// Retourne une campagne par son id. Accessible sans authentification.
   Future<ScratchCampaign?> fetchCampaignById(String campaignId) async {
     final DocumentSnapshot<Map<String, dynamic>> doc =
@@ -78,6 +90,23 @@ class ScratchService {
     return snap.docs.map((d) => UserReward.fromFirestore(d)).toList();
   }
 
+  /// Retourne les récompenses éligibles pour un trajet bus (transport),
+  /// triées de la plus ancienne à la plus récente (FIFO).
+  Future<List<UserReward>> fetchEligibleRewardsForTransport() async {
+    final String? uid = _uid;
+    if (uid == null) return [];
+    final QuerySnapshot<Map<String, dynamic>> snap = await _db
+        .collection('user_rewards/$uid/rewards')
+        .where('status', isEqualTo: 'available')
+        .where('type', isEqualTo: 'discount_fixed')
+        .orderBy('earnedAt')
+        .get();
+    return snap.docs
+        .map((d) => UserReward.fromFirestore(d))
+        .where((r) => r.isEligibleForTransport)
+        .toList();
+  }
+
   // ── Callables ────────────────────────────────────────────────────────────────
 
   /// Registers an app launch for the current user.
@@ -112,5 +141,13 @@ class ScratchService {
       if (context != null) 'context': context,
     });
     return (result.data as Map?)?['redemptionId'] as String? ?? '';
+  }
+
+  bool isCardAlreadyProcessedError(Object error) {
+    if (error is! FirebaseFunctionsException) return false;
+    if (error.code != 'failed-precondition') return false;
+
+    final String message = (error.message ?? '').toLowerCase();
+    return message.contains('already revealed') || message.contains('has expired');
   }
 }

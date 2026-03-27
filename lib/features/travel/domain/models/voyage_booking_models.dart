@@ -38,6 +38,8 @@ class CreateVoyageBookingInput {
     this.idempotencyKey,
     this.effectiveDepartureDate,
     this.comfortOptions = const <String>[],
+    this.appliedRewardIds = const <String>[],
+    this.studentDiscount = 0,
   });
 
   final String tripId;
@@ -50,6 +52,10 @@ class CreateVoyageBookingInput {
   final String? idempotencyKey;
   final String? effectiveDepartureDate;
   final List<String> comfortOptions;
+  /// IDs des récompenses appliquées. Le backend met à jour remainingValue.
+  final List<String> appliedRewardIds;
+  /// Remise étudiante transiente (non persistée en user_rewards).
+  final int studentDiscount;
   final String segmentFrom;
   final String segmentTo;
   final int segmentPrice;
