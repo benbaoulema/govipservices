@@ -17,11 +17,9 @@ import 'package:govipservices/features/travel/domain/models/transport_company.da
 const Color _accent = Color(0xFF14B8A6);
 const Color _accentDark = Color(0xFF0F766E);
 const Color _surface = Color(0xFFFFFFFF);
-const Color _bg = Color(0xFFF2FFFC);
 
-const LatLng _kDefaultCenter = LatLng(4.0511, 9.7679); // Douala, Cameroun
+const LatLng _kDefaultCenter = LatLng(4.0511, 9.7679);
 
-// Créneaux fixes 00h → 23h
 final List<String> _kTimeSlots = List.generate(
   24,
   (i) => '${i.toString().padLeft(2, '0')}h',
@@ -43,7 +41,7 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
 
   GoogleMapController? _mapController;
 
-  // ── Données filtres ─────────────────────────────────────────────────────────
+  // ── Filtres ─────────────────────────────────────────────────────────────────
   List<TransportCompany> _companies = [];
   TransportCompany? _selectedCompany;
 
@@ -53,17 +51,17 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
   List<String> _arrivals = [];
   String? _selectedArrival;
 
-  String? _selectedHour; // ex: '07h'
+  String? _selectedHour;
 
   bool _loadingCompanies = true;
   bool _loadingDepartures = false;
   bool _loadingArrivals = false;
 
-  // ── Sessions GO Radar ───────────────────────────────────────────────────────
+  // ── Sessions ─────────────────────────────────────────────────────────────────
   StreamSubscription<List<GoRadarSession>>? _sessionsSub;
   List<GoRadarSession> _sessions = [];
 
-  // ── Map ─────────────────────────────────────────────────────────────────────
+  // ── Map ──────────────────────────────────────────────────────────────────────
   Set<Marker> _markers = {};
   Set<Polyline> _polylines = {};
   BitmapDescriptor? _busIcon;
@@ -86,7 +84,7 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
     super.dispose();
   }
 
-  // ── Icône bus ────────────────────────────────────────────────────────────────
+  // ── Icône bus ─────────────────────────────────────────────────────────────────
 
   Future<void> _loadBusIcon() async {
     final BitmapDescriptor icon = await _emojiToBitmap('🚌', 48);
@@ -110,13 +108,11 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
     return BitmapDescriptor.bytes(data!.buffer.asUint8List());
   }
 
-  // ── Chargement données ────────────────────────────────────────────────────
+  // ── Données ──────────────────────────────────────────────────────────────────
 
   Future<void> _loadCompanies() async {
-    setState(() => _loadingCompanies = true);
     try {
-      final List<TransportCompany> list =
-          await _companyRepo.fetchEnabled();
+      final List<TransportCompany> list = await _companyRepo.fetchEnabled();
       if (!mounted) return;
       setState(() {
         _companies = list;
@@ -129,16 +125,18 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
   }
 
   Future<void> _onCompanySelected(TransportCompany company) async {
+    final bool same = company.id == _selectedCompany?.id;
     setState(() {
-      _selectedCompany = company;
+      _selectedCompany = same ? null : company;
       _selectedDeparture = null;
       _selectedArrival = null;
       _selectedHour = null;
       _departures = [];
       _arrivals = [];
-      _loadingDepartures = true;
+      _loadingDepartures = !same;
     });
-    _cancelSessionStream();
+    _cancelStream();
+    if (same) return;
 
     try {
       final QuerySnapshot<Map<String, dynamic>> snap = await FirebaseFirestore
@@ -151,9 +149,8 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
           .where((s) => s.isNotEmpty)
           .toSet();
       if (!mounted) return;
-      final List<String> sorted = places.toList()..sort();
       setState(() {
-        _departures = sorted;
+        _departures = places.toList()..sort();
         _loadingDepartures = false;
       });
     } catch (_) {
@@ -162,31 +159,32 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
     }
   }
 
-  Future<void> _onDepartureSelected(String departure) async {
+  Future<void> _onDepartureSelected(String dep) async {
+    final bool same = dep == _selectedDeparture;
     setState(() {
-      _selectedDeparture = departure;
+      _selectedDeparture = same ? null : dep;
       _selectedArrival = null;
       _selectedHour = null;
       _arrivals = [];
-      _loadingArrivals = true;
+      _loadingArrivals = !same;
     });
-    _cancelSessionStream();
+    _cancelStream();
+    if (same) return;
 
     try {
       final QuerySnapshot<Map<String, dynamic>> snap = await FirebaseFirestore
           .instance
           .collection('voyageTrips')
           .where('companyId', isEqualTo: _selectedCompany!.id)
-          .where('departurePlace', isEqualTo: departure)
+          .where('departurePlace', isEqualTo: dep)
           .get();
       final Set<String> places = snap.docs
           .map((d) => (d.data()['arrivalPlace'] as String? ?? '').trim())
           .where((s) => s.isNotEmpty)
           .toSet();
       if (!mounted) return;
-      final List<String> sorted = places.toList()..sort();
       setState(() {
-        _arrivals = sorted;
+        _arrivals = places.toList()..sort();
         _loadingArrivals = false;
       });
     } catch (_) {
@@ -195,22 +193,28 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
     }
   }
 
-  void _onArrivalSelected(String arrival) {
+  void _onArrivalSelected(String arr) {
+    final bool same = arr == _selectedArrival;
     setState(() {
-      _selectedArrival = arrival;
+      _selectedArrival = same ? null : arr;
       _selectedHour = null;
     });
-    _cancelSessionStream();
+    _cancelStream();
   }
 
   void _onHourSelected(String hour) {
-    setState(() => _selectedHour = hour);
-    _startSessionStream();
+    final bool same = hour == _selectedHour;
+    setState(() => _selectedHour = same ? null : hour);
+    if (!same) {
+      _startStream();
+    } else {
+      _cancelStream();
+    }
   }
 
-  // ── Stream sessions ──────────────────────────────────────────────────────────
+  // ── Stream sessions ───────────────────────────────────────────────────────────
 
-  void _cancelSessionStream() {
+  void _cancelStream() {
     _sessionsSub?.cancel();
     _sessionsSub = null;
     setState(() {
@@ -220,94 +224,87 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
     });
   }
 
-  void _startSessionStream() {
+  void _startStream() {
     _sessionsSub?.cancel();
     if (_selectedCompany == null ||
         _selectedDeparture == null ||
         _selectedArrival == null ||
-        _selectedHour == null) {
-      return;
-    }
+        _selectedHour == null) return;
 
-    final String hourPrefix =
-        _selectedHour!.replaceAll('h', ''); // '07h' → '07'
+    final String hourPrefix = _selectedHour!.replaceAll('h', '');
 
-    _sessionsSub = _radarRepo.watchActiveSessions().listen((sessions) async {
+    _sessionsSub = _radarRepo.watchActiveSessions().listen((all) async {
       if (!mounted) return;
-      final List<GoRadarSession> filtered = sessions.where((s) {
+      final List<GoRadarSession> filtered = all.where((s) {
         if (s.companyId != _selectedCompany!.id) return false;
         if (s.departure != _selectedDeparture) return false;
         if (s.arrival != _selectedArrival) return false;
         if (!s.scheduledTime.startsWith(hourPrefix)) return false;
         return true;
       }).toList();
-
       setState(() => _sessions = filtered);
-      await _refreshMapOverlays(filtered);
+      await _refreshMap(filtered);
     });
   }
 
-  // ── Overlays map ─────────────────────────────────────────────────────────────
+  // ── Map overlays ──────────────────────────────────────────────────────────────
 
-  Future<void> _refreshMapOverlays(List<GoRadarSession> sessions) async {
+  Future<void> _refreshMap(List<GoRadarSession> sessions) async {
     final Set<Marker> markers = {};
     final Set<Polyline> polylines = {};
 
-    for (final GoRadarSession session in sessions) {
-      final double? busLat = session.lastLat ?? session.departureLat;
-      final double? busLng = session.lastLng ?? session.departureLng;
+    for (final GoRadarSession s in sessions) {
+      final double? busLat = s.lastLat ?? s.departureLat;
+      final double? busLng = s.lastLng ?? s.departureLng;
 
       if (busLat != null && busLng != null) {
         markers.add(Marker(
-          markerId: MarkerId(session.id),
+          markerId: MarkerId(s.id),
           position: LatLng(busLat, busLng),
           icon: _busIcon ??
               BitmapDescriptor.defaultMarkerWithHue(
                   BitmapDescriptor.hueGreen),
           infoWindow: InfoWindow(
-            title: '${session.departure} → ${session.arrival}',
+            title: '${s.departure} → ${s.arrival}',
             snippet:
-                '${session.status.label}  •  ${session.availableSeats} place(s)  •  Départ ${session.slotNumber}',
+                '${s.status.label}  •  ${s.availableSeats} place(s)  •  Dép. ${s.slotNumber}',
           ),
         ));
       }
 
-      if (session.departureLat != null &&
-          session.departureLng != null &&
-          session.arrivalLat != null &&
-          session.arrivalLng != null) {
-        final String cacheKey =
-            '${session.departureLat},${session.departureLng}'
-            '-${session.arrivalLat},${session.arrivalLng}';
-
-        if (!_routeCache.containsKey(cacheKey)) {
-          final RouteResult result = await _routeService.fetchRoute(
-            pickupLat: session.departureLat!,
-            pickupLng: session.departureLng!,
-            deliveryLat: session.arrivalLat!,
-            deliveryLng: session.arrivalLng!,
+      if (s.departureLat != null &&
+          s.departureLng != null &&
+          s.arrivalLat != null &&
+          s.arrivalLng != null) {
+        final String key =
+            '${s.departureLat},${s.departureLng}-${s.arrivalLat},${s.arrivalLng}';
+        if (!_routeCache.containsKey(key)) {
+          final RouteResult r = await _routeService.fetchRoute(
+            pickupLat: s.departureLat!,
+            pickupLng: s.departureLng!,
+            deliveryLat: s.arrivalLat!,
+            deliveryLng: s.arrivalLng!,
           );
-          _routeCache[cacheKey] = result.points;
+          _routeCache[key] = r.points;
         }
 
-        final List<LatLng> fullRoute = _routeCache[cacheKey] ?? [];
-        if (fullRoute.isNotEmpty && busLat != null && busLng != null) {
-          final int splitIdx =
-              _nearestPointIndex(fullRoute, LatLng(busLat, busLng));
-
-          if (splitIdx > 0) {
+        final List<LatLng> full = _routeCache[key] ?? [];
+        if (full.isNotEmpty && busLat != null && busLng != null) {
+          final int idx =
+              _nearestIdx(full, LatLng(busLat, busLng));
+          if (idx > 0) {
             polylines.add(Polyline(
-              polylineId: PolylineId('${session.id}_done'),
-              points: fullRoute.sublist(0, splitIdx + 1),
+              polylineId: PolylineId('${s.id}_done'),
+              points: full.sublist(0, idx + 1),
               color: Colors.grey.shade400,
               width: 4,
               zIndex: 1,
             ));
           }
-          if (splitIdx < fullRoute.length - 1) {
+          if (idx < full.length - 1) {
             polylines.add(Polyline(
-              polylineId: PolylineId('${session.id}_remaining'),
-              points: fullRoute.sublist(splitIdx),
+              polylineId: PolylineId('${s.id}_remaining'),
+              points: full.sublist(idx),
               color: _accent,
               width: 5,
               zIndex: 2,
@@ -323,57 +320,52 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
       _polylines = polylines;
     });
 
-    // Centre la caméra sur les résultats
     if (markers.isNotEmpty && _mapController != null) {
-      final List<LatLng> positions =
-          markers.map((m) => m.position).toList();
-      if (positions.length == 1) {
-        _mapController!.animateCamera(
-          CameraUpdate.newLatLngZoom(positions.first, 11),
-        );
-      } else {
-        double minLat = positions.first.latitude;
-        double maxLat = positions.first.latitude;
-        double minLng = positions.first.longitude;
-        double maxLng = positions.first.longitude;
-        for (final p in positions) {
-          if (p.latitude < minLat) minLat = p.latitude;
-          if (p.latitude > maxLat) maxLat = p.latitude;
-          if (p.longitude < minLng) minLng = p.longitude;
-          if (p.longitude > maxLng) maxLng = p.longitude;
-        }
-        _mapController!.animateCamera(
-          CameraUpdate.newLatLngBounds(
-            LatLngBounds(
-              southwest: LatLng(minLat - 0.05, minLng - 0.05),
-              northeast: LatLng(maxLat + 0.05, maxLng + 0.05),
-            ),
-            80,
-          ),
-        );
-      }
+      _fitBounds(markers.map((m) => m.position).toList());
     }
   }
 
-  int _nearestPointIndex(List<LatLng> points, LatLng target) {
-    int nearestIdx = 0;
-    double minDist = double.infinity;
-    for (int i = 0; i < points.length; i++) {
+  void _fitBounds(List<LatLng> positions) {
+    if (positions.length == 1) {
+      _mapController!.animateCamera(
+          CameraUpdate.newLatLngZoom(positions.first, 12));
+      return;
+    }
+    double minLat = positions.first.latitude;
+    double maxLat = positions.first.latitude;
+    double minLng = positions.first.longitude;
+    double maxLng = positions.first.longitude;
+    for (final p in positions) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+    }
+    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(
+      LatLngBounds(
+        southwest: LatLng(minLat - 0.05, minLng - 0.05),
+        northeast: LatLng(maxLat + 0.05, maxLng + 0.05),
+      ),
+      80,
+    ));
+  }
+
+  int _nearestIdx(List<LatLng> pts, LatLng target) {
+    int best = 0;
+    double minD = double.infinity;
+    for (int i = 0; i < pts.length; i++) {
       final double d = Geolocator.distanceBetween(
-        target.latitude,
-        target.longitude,
-        points[i].latitude,
-        points[i].longitude,
-      );
-      if (d < minDist) {
-        minDist = d;
-        nearestIdx = i;
+          target.latitude, target.longitude,
+          pts[i].latitude, pts[i].longitude);
+      if (d < minD) {
+        minD = d;
+        best = i;
       }
     }
-    return nearestIdx;
+    return best;
   }
 
-  // ── GPS ───────────────────────────────────────────────────────────────────────
+  // ── GPS ────────────────────────────────────────────────────────────────────
 
   Future<void> _goToMyLocation() async {
     try {
@@ -393,33 +385,28 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
     } catch (_) {}
   }
 
-  void _onSessionTap(GoRadarSession session) {
-    final double? lat = session.lastLat ?? session.departureLat;
-    final double? lng = session.lastLng ?? session.departureLng;
+  void _onSessionTap(GoRadarSession s) {
+    final double? lat = s.lastLat ?? s.departureLat;
+    final double? lng = s.lastLng ?? s.departureLng;
     if (lat != null && lng != null) {
       _mapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(LatLng(lat, lng), 14),
-      );
-      _mapController?.showMarkerInfoWindow(MarkerId(session.id));
+          CameraUpdate.newLatLngZoom(LatLng(lat, lng), 14));
+      _mapController?.showMarkerInfoWindow(MarkerId(s.id));
     }
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────────
+  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final bool hasResults = _sessions.isNotEmpty;
-
     return Scaffold(
       body: Stack(
         children: [
-          // ── Carte plein écran ────────────────────────────────────────
+          // ── Carte ──────────────────────────────────────────────────
           GoogleMap(
-            initialCameraPosition: const CameraPosition(
-              target: _kDefaultCenter,
-              zoom: 10,
-            ),
-            onMapCreated: (ctrl) => _mapController = ctrl,
+            initialCameraPosition:
+                const CameraPosition(target: _kDefaultCenter, zoom: 10),
+            onMapCreated: (c) => _mapController = c,
             markers: _markers,
             polylines: _polylines,
             myLocationEnabled: true,
@@ -428,17 +415,16 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
             mapToolbarEnabled: false,
           ),
 
-          // ── Bouton retour ────────────────────────────────────────────
+          // ── Bouton retour ───────────────────────────────────────────
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
             left: 12,
-            child: _MapIconButton(
-              icon: Icons.arrow_back_ios_new_rounded,
-              onTap: () => Navigator.of(context).pop(),
-            ),
+            child: _MapBtn(
+                icon: Icons.arrow_back_ios_new_rounded,
+                onTap: () => Navigator.of(context).pop()),
           ),
 
-          // ── Titre ────────────────────────────────────────────────────
+          // ── Titre ───────────────────────────────────────────────────
           Positioned(
             top: MediaQuery.of(context).padding.top + 12,
             left: 0,
@@ -452,10 +438,9 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.15),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
+                        color: Colors.black.withValues(alpha: 0.15),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2))
                   ],
                 ),
                 child: Row(
@@ -464,32 +449,25 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
                     const Icon(Icons.radar_rounded,
                         color: Colors.white, size: 16),
                     const SizedBox(width: 6),
-                    const Text(
-                      'GO Radar',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    if (hasResults) ...[
+                    const Text('GO Radar',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700)),
+                    if (_sessions.isNotEmpty) ...[
                       const SizedBox(width: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 7, vertical: 2),
                         decoration: BoxDecoration(
-                          color:
-                              Colors.white.withValues(alpha: 0.25),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          '${_sessions.length}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
+                            color:
+                                Colors.white.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(10)),
+                        child: Text('${_sessions.length}',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700)),
                       ),
                     ],
                   ],
@@ -498,37 +476,35 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
             ),
           ),
 
-          // ── Bouton ma position ───────────────────────────────────────
+          // ── Bouton ma position ──────────────────────────────────────
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
             right: 12,
-            child: _MapIconButton(
-              icon: Icons.my_location_rounded,
-              onTap: _goToMyLocation,
-            ),
+            child: _MapBtn(
+                icon: Icons.my_location_rounded,
+                onTap: _goToMyLocation),
           ),
 
-          // ── Sheet 2 : résultats (draggable, apparaît si résultats) ──
-          if (hasResults)
+          // ── Sheet résultats (par-dessus le sheet filtres) ───────────
+          if (_sessions.isNotEmpty)
             DraggableScrollableSheet(
-              initialChildSize: 0.38,
-              minChildSize: 0.12,
-              maxChildSize: 0.70,
-              builder: (_, scrollController) {
-                return _ResultsSheet(
-                  scrollController: scrollController,
-                  sessions: _sessions,
-                  onSessionTap: _onSessionTap,
-                );
-              },
+              initialChildSize: 0.40,
+              minChildSize: 0.10,
+              maxChildSize: 0.72,
+              builder: (_, sc) => _ResultsSheet(
+                scrollController: sc,
+                sessions: _sessions,
+                onSessionTap: _onSessionTap,
+              ),
             ),
 
-          // ── Sheet 1 : filtres (fixe en bas) ─────────────────────────
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: _FiltersPanel(
+          // ── Sheet filtres ───────────────────────────────────────────
+          DraggableScrollableSheet(
+            initialChildSize: 0.52,
+            minChildSize: 0.10,
+            maxChildSize: 0.88,
+            builder: (_, sc) => _FiltersSheet(
+              scrollController: sc,
               companies: _companies,
               loadingCompanies: _loadingCompanies,
               selectedCompany: _selectedCompany,
@@ -551,10 +527,11 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
   }
 }
 
-// ─── Sheet 1 : Filtres ────────────────────────────────────────────────────────
+// ─── Sheet filtres ────────────────────────────────────────────────────────────
 
-class _FiltersPanel extends StatelessWidget {
-  const _FiltersPanel({
+class _FiltersSheet extends StatelessWidget {
+  const _FiltersSheet({
+    required this.scrollController,
     required this.companies,
     required this.loadingCompanies,
     required this.selectedCompany,
@@ -571,245 +548,435 @@ class _FiltersPanel extends StatelessWidget {
     required this.onHourSelected,
   });
 
+  final ScrollController scrollController;
   final List<TransportCompany> companies;
   final bool loadingCompanies;
   final TransportCompany? selectedCompany;
   final void Function(TransportCompany) onCompanySelected;
-
   final List<String> departures;
   final bool loadingDepartures;
   final String? selectedDeparture;
   final void Function(String) onDepartureSelected;
-
   final List<String> arrivals;
   final bool loadingArrivals;
   final String? selectedArrival;
   final void Function(String) onArrivalSelected;
-
   final String? selectedHour;
   final void Function(String) onHourSelected;
 
   @override
   Widget build(BuildContext context) {
-    final double bottomPad = MediaQuery.of(context).padding.bottom;
     return Container(
       decoration: const BoxDecoration(
         color: _surface,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-        ),
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(22)),
         boxShadow: [
           BoxShadow(
-            color: Color(0x20000000),
-            blurRadius: 20,
-            offset: Offset(0, -4),
-          ),
+              color: Color(0x22000000),
+              blurRadius: 24,
+              offset: Offset(0, -6))
         ],
       ),
-      padding: EdgeInsets.fromLTRB(0, 10, 0, bottomPad + 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: ListView(
+        controller: scrollController,
+        padding: EdgeInsets.zero,
         children: [
-          // Poignée décorative
+          // Poignée
           Center(
             child: Container(
-              width: 36,
+              margin: const EdgeInsets.only(top: 12, bottom: 6),
+              width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey.shade200,
-                borderRadius: BorderRadius.circular(2),
-              ),
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2)),
             ),
           ),
-          const SizedBox(height: 10),
+
+          // Titre sheet
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+            child: Row(
+              children: [
+                const Icon(Icons.search_rounded,
+                    color: _accentDark, size: 20),
+                const SizedBox(width: 8),
+                const Text('Rechercher un voyage',
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF0F172A))),
+              ],
+            ),
+          ),
 
           // ── Compagnies ─────────────────────────────────────────────
-          _FilterRow(
-            label: 'Compagnie',
-            loading: loadingCompanies,
-            isEmpty: companies.isEmpty && !loadingCompanies,
-            emptyText: 'Aucune compagnie',
-            child: Row(
-              children: companies.map((c) {
-                final bool sel = c.id == selectedCompany?.id;
-                return _Chip(
-                  label: c.name,
-                  selected: sel,
-                  onTap: () => onCompanySelected(c),
-                );
-              }).toList(),
+          _SectionLabel(label: 'Compagnie'),
+          if (loadingCompanies)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(
+                  child: CircularProgressIndicator(
+                      color: _accent, strokeWidth: 2)),
+            )
+          else
+            _CompanyRow(
+              companies: companies,
+              selectedId: selectedCompany?.id,
+              onSelect: onCompanySelected,
             ),
+
+          const SizedBox(height: 16),
+
+          // ── Départs ────────────────────────────────────────────────
+          _SectionLabel(label: 'Ville de départ'),
+          _CityRow(
+            cities: departures,
+            loading: loadingDepartures,
+            selected: selectedDeparture,
+            emptyText: selectedCompany == null
+                ? 'Sélectionnez une compagnie'
+                : 'Aucun trajet disponible',
+            onSelect: onDepartureSelected,
           ),
 
-          // ── Départs (si compagnie sélectionnée) ────────────────────
-          if (selectedCompany != null)
-            _FilterRow(
-              label: 'Départ',
-              loading: loadingDepartures,
-              isEmpty: departures.isEmpty && !loadingDepartures,
-              emptyText: 'Aucun trajet',
-              child: Row(
-                children: departures.map((d) {
-                  final bool sel = d == selectedDeparture;
-                  return _Chip(
-                    label: d,
-                    selected: sel,
-                    onTap: () => onDepartureSelected(d),
-                  );
-                }).toList(),
-              ),
-            ),
+          const SizedBox(height: 16),
 
-          // ── Arrivées (si départ sélectionné) ───────────────────────
-          if (selectedDeparture != null)
-            _FilterRow(
-              label: 'Arrivée',
-              loading: loadingArrivals,
-              isEmpty: arrivals.isEmpty && !loadingArrivals,
-              emptyText: 'Aucune arrivée',
-              child: Row(
-                children: arrivals.map((a) {
-                  final bool sel = a == selectedArrival;
-                  return _Chip(
-                    label: a,
-                    selected: sel,
-                    onTap: () => onArrivalSelected(a),
-                  );
-                }).toList(),
-              ),
-            ),
+          // ── Arrivées ────────────────────────────────────────────────
+          _SectionLabel(label: "Ville d'arrivée"),
+          _CityRow(
+            cities: arrivals,
+            loading: loadingArrivals,
+            selected: selectedArrival,
+            emptyText: selectedDeparture == null
+                ? 'Sélectionnez un départ'
+                : 'Aucune arrivée disponible',
+            onSelect: onArrivalSelected,
+          ),
 
-          // ── Créneaux horaires (si arrivée sélectionnée) ────────────
-          if (selectedArrival != null)
-            _FilterRow(
-              label: 'Heure',
-              loading: false,
-              isEmpty: false,
-              emptyText: '',
-              child: Row(
-                children: _kTimeSlots.map((h) {
-                  final bool sel = h == selectedHour;
-                  return _Chip(
-                    label: h,
-                    selected: sel,
-                    onTap: () => onHourSelected(h),
-                  );
-                }).toList(),
-              ),
-            ),
+          const SizedBox(height: 16),
+
+          // ── Horaires ────────────────────────────────────────────────
+          _SectionLabel(label: 'Heure de départ'),
+          _TimeRow(
+            selected: selectedHour,
+            enabled: selectedArrival != null,
+            onSelect: onHourSelected,
+          ),
+
+          SizedBox(
+              height:
+                  MediaQuery.of(context).padding.bottom + 24),
         ],
       ),
     );
   }
 }
 
-class _FilterRow extends StatelessWidget {
-  const _FilterRow({
-    required this.label,
-    required this.loading,
-    required this.isEmpty,
-    required this.emptyText,
-    required this.child,
-  });
+// ─── Composants filtres ───────────────────────────────────────────────────────
 
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({required this.label});
   final String label;
-  final bool loading;
-  final bool isEmpty;
-  final String emptyText;
-  final Widget child;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const SizedBox(width: 16),
-          SizedBox(
-            width: 62,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey.shade500,
-              ),
-            ),
-          ),
-          if (loading)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8),
-              child: SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(
-                    color: _accent, strokeWidth: 2),
-              ),
-            )
-          else if (isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text(
-                emptyText,
-                style: TextStyle(
-                    fontSize: 12, color: Colors.grey.shade400),
-              ),
-            )
-          else
-            Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.only(right: 16),
-                child: child,
-              ),
-            ),
-        ],
+      padding: const EdgeInsets.only(left: 20, bottom: 10),
+      child: Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: Colors.grey.shade400,
+          letterSpacing: 0.8,
+        ),
       ),
     );
   }
 }
 
-class _Chip extends StatelessWidget {
-  const _Chip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
+// Cartes compagnies (style book_trip_page)
+class _CompanyRow extends StatelessWidget {
+  const _CompanyRow({
+    required this.companies,
+    required this.selectedId,
+    required this.onSelect,
   });
 
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
+  final List<TransportCompany> companies;
+  final String? selectedId;
+  final void Function(TransportCompany) onSelect;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        margin: const EdgeInsets.only(right: 6),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? _accentDark : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: selected ? Colors.white : Colors.grey.shade700,
-          ),
-        ),
+    if (companies.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        child: Text('Aucune compagnie',
+            style:
+                TextStyle(fontSize: 13, color: Colors.grey.shade400)),
+      );
+    }
+    return SizedBox(
+      height: 80,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        itemCount: companies.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (_, i) {
+          final TransportCompany c = companies[i];
+          final bool sel = c.id == selectedId;
+          return GestureDetector(
+            onTap: () => onSelect(c),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              width: 120,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: sel ? _accent : const Color(0xFFD8F3EE),
+                  width: sel ? 2.5 : 1.5,
+                ),
+                color: sel
+                    ? _accent.withValues(alpha: 0.07)
+                    : Colors.white,
+                boxShadow: sel
+                    ? [
+                        BoxShadow(
+                            color: _accent.withValues(alpha: 0.18),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4))
+                      ]
+                    : const [],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(13),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (c.imageUrl != null)
+                      Image.network(
+                        c.imageUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            const SizedBox.shrink(),
+                      ),
+                    // Gradient overlay si image
+                    if (c.imageUrl != null)
+                      Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black
+                                  .withValues(alpha: 0.55),
+                            ],
+                          ),
+                        ),
+                      ),
+                    // Nom compagnie
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding:
+                            const EdgeInsets.fromLTRB(6, 0, 6, 8),
+                        child: Text(
+                          c.name,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: c.imageUrl != null
+                                ? Colors.white
+                                : (sel
+                                    ? _accentDark
+                                    : const Color(0xFF0F172A)),
+                            shadows: c.imageUrl != null
+                                ? const [
+                                    Shadow(
+                                        blurRadius: 4,
+                                        color: Colors.black54)
+                                  ]
+                                : null,
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Check sélection
+                    if (sel)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          width: 18,
+                          height: 18,
+                          decoration: const BoxDecoration(
+                              color: _accent,
+                              shape: BoxShape.circle),
+                          child: const Icon(Icons.check_rounded,
+                              size: 12, color: Colors.white),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 }
 
-// ─── Sheet 2 : Résultats ──────────────────────────────────────────────────────
+// Villes départ / arrivée
+class _CityRow extends StatelessWidget {
+  const _CityRow({
+    required this.cities,
+    required this.loading,
+    required this.selected,
+    required this.emptyText,
+    required this.onSelect,
+  });
+
+  final List<String> cities;
+  final bool loading;
+  final String? selected;
+  final String emptyText;
+  final void Function(String) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+        child: SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+                color: _accent, strokeWidth: 2)),
+      );
+    }
+    if (cities.isEmpty) {
+      return Padding(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+        child: Text(emptyText,
+            style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey.shade400,
+                fontStyle: FontStyle.italic)),
+      );
+    }
+    return SizedBox(
+      height: 40,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        itemCount: cities.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final String city = cities[i];
+          final bool sel = city == selected;
+          return GestureDetector(
+            onTap: () => onSelect(city),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: sel ? _accentDark : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                city,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: sel
+                      ? Colors.white
+                      : const Color(0xFF334155),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// Créneaux horaires
+class _TimeRow extends StatelessWidget {
+  const _TimeRow({
+    required this.selected,
+    required this.enabled,
+    required this.onSelect,
+  });
+
+  final String? selected;
+  final bool enabled;
+  final void Function(String) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled) {
+      return Padding(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+        child: Text("Sélectionnez une arrivée d'abord",
+            style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey.shade400,
+                fontStyle: FontStyle.italic)),
+      );
+    }
+    return SizedBox(
+      height: 40,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        itemCount: _kTimeSlots.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final String h = _kTimeSlots[i];
+          final bool sel = h == selected;
+          return GestureDetector(
+            onTap: () => onSelect(h),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: sel ? _accentDark : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                h,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: sel
+                      ? Colors.white
+                      : const Color(0xFF475569),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Sheet résultats ──────────────────────────────────────────────────────────
 
 class _ResultsSheet extends StatelessWidget {
   const _ResultsSheet({
@@ -826,82 +993,67 @@ class _ResultsSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: _bg,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-        ),
+        color: Color(0xFFF0FDFB),
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(22)),
         boxShadow: [
           BoxShadow(
-            color: Color(0x18000000),
-            blurRadius: 16,
-            offset: Offset(0, -4),
-          ),
+              color: Color(0x20000000),
+              blurRadius: 20,
+              offset: Offset(0, -4))
         ],
       ),
       child: ListView(
         controller: scrollController,
         padding: EdgeInsets.zero,
         children: [
-          // Poignée
           Center(
             child: Container(
-              margin: const EdgeInsets.only(top: 10, bottom: 8),
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
-              ),
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2)),
             ),
           ),
-
-          // En-tête
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
             child: Row(
               children: [
                 const Icon(Icons.directions_bus_rounded,
                     color: _accentDark, size: 20),
                 const SizedBox(width: 8),
-                const Text(
-                  'Bus en direct',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0F172A),
-                  ),
-                ),
+                const Text('Bus en direct',
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF0F172A))),
                 const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _accent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                      color: _accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12)),
                   child: Text(
                     '${sessions.length} trouvé${sessions.length > 1 ? 's' : ''}',
                     style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: _accentDark,
-                    ),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _accentDark),
                   ),
                 ),
               ],
             ),
           ),
-
           // Légende polyline
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
             child: Row(
               children: [
                 Container(
-                    width: 24,
-                    height: 4,
-                    color: Colors.grey.shade400),
+                    width: 24, height: 4, color: Colors.grey.shade400),
                 const SizedBox(width: 6),
                 Text('Trajet effectué',
                     style: TextStyle(
@@ -909,19 +1061,15 @@ class _ResultsSheet extends StatelessWidget {
                 const SizedBox(width: 16),
                 Container(width: 24, height: 4, color: _accent),
                 const SizedBox(width: 6),
-                Text('Trajet restant',
+                Text('Restant',
                     style: TextStyle(
                         fontSize: 11, color: Colors.grey.shade500)),
               ],
             ),
           ),
-
-          // Cartes sessions
-          ...sessions.map(
-            (s) => _SessionCard(
-                session: s, onTap: () => onSessionTap(s)),
-          ),
-          const SizedBox(height: 24),
+          ...sessions.map((s) =>
+              _SessionCard(session: s, onTap: () => onSessionTap(s))),
+          const SizedBox(height: 32),
         ],
       ),
     );
@@ -943,17 +1091,17 @@ class _SessionCard extends StatelessWidget {
         GoRadarStatus.termine => Colors.grey,
       };
 
-  String _updatedAgo() {
-    final Duration diff =
+  String _ago() {
+    final Duration d =
         DateTime.now().difference(session.lastUpdatedAt);
-    if (diff.inMinutes < 1) return 'À l\'instant';
-    if (diff.inMinutes < 60) return 'il y a ${diff.inMinutes} min';
-    return 'il y a ${diff.inHours}h';
+    if (d.inMinutes < 1) return 'À l\'instant';
+    if (d.inMinutes < 60) return 'il y a ${d.inMinutes} min';
+    return 'il y a ${d.inHours}h';
   }
 
   @override
   Widget build(BuildContext context) {
-    final Color statusColor = _statusColor(session.status);
+    final Color sc = _statusColor(session.status);
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -965,10 +1113,9 @@ class _SessionCard extends StatelessWidget {
           border: Border.all(color: Colors.grey.shade100),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2))
           ],
         ),
         child: Column(
@@ -977,45 +1124,35 @@ class _SessionCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    session.companyName,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF0F172A),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text(session.companyName,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0F172A)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
                 ),
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+                      color: sc.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10)),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: statusColor,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                              color: sc, shape: BoxShape.circle)),
                       const SizedBox(width: 4),
-                      Text(
-                        session.status.label,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: statusColor,
-                        ),
-                      ),
+                      Text(session.status.label,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: sc)),
                     ],
                   ),
                 ),
@@ -1028,33 +1165,25 @@ class _SessionCard extends StatelessWidget {
                     size: 14, color: _accent),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: Text(
-                    session.departure,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF334155),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
+                    child: Text(session.departure,
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF334155)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis)),
                 const Icon(Icons.arrow_forward_rounded,
                     size: 14, color: Color(0xFF94A3B8)),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: Text(
-                    session.arrival,
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF334155),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
+                    child: Text(session.arrival,
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF334155)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis)),
               ],
             ),
             const SizedBox(height: 6),
@@ -1063,41 +1192,28 @@ class _SessionCard extends StatelessWidget {
                 Icon(Icons.schedule_rounded,
                     size: 13, color: Colors.grey.shade400),
                 const SizedBox(width: 4),
-                Text(
-                  session.scheduledTime,
-                  style: TextStyle(
-                      fontSize: 12, color: Colors.grey.shade500),
-                ),
+                Text(session.scheduledTime,
+                    style: TextStyle(
+                        fontSize: 12, color: Colors.grey.shade500)),
                 const SizedBox(width: 10),
-                Icon(Icons.confirmation_number_outlined,
-                    size: 13, color: Colors.grey.shade400),
-                const SizedBox(width: 4),
-                Text(
-                  'Départ ${session.slotNumber}',
-                  style: TextStyle(
-                      fontSize: 12, color: Colors.grey.shade500),
-                ),
+                Text('Départ ${session.slotNumber}',
+                    style: TextStyle(
+                        fontSize: 12, color: Colors.grey.shade500)),
                 const Spacer(),
                 Icon(Icons.event_seat_outlined,
                     size: 13, color: _accentDark),
                 const SizedBox(width: 3),
-                Text(
-                  '${session.availableSeats} pl.',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: _accentDark,
-                  ),
-                ),
+                Text('${session.availableSeats} pl.',
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _accentDark)),
                 const SizedBox(width: 10),
-                Text(
-                  _updatedAgo(),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade400,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
+                Text(_ago(),
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade400,
+                        fontStyle: FontStyle.italic)),
               ],
             ),
           ],
@@ -1109,8 +1225,8 @@ class _SessionCard extends StatelessWidget {
 
 // ─── Bouton flottant map ──────────────────────────────────────────────────────
 
-class _MapIconButton extends StatelessWidget {
-  const _MapIconButton({required this.icon, required this.onTap});
+class _MapBtn extends StatelessWidget {
+  const _MapBtn({required this.icon, required this.onTap});
 
   final IconData icon;
   final VoidCallback onTap;
@@ -1127,10 +1243,9 @@ class _MapIconButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.12),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 8,
+                offset: const Offset(0, 2))
           ],
         ),
         child: Icon(icon, size: 20, color: _accentDark),
