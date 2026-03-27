@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -10,6 +9,7 @@ import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/features/parcels/data/parcel_route_preview_service.dart';
 import 'package:govipservices/features/travel/data/go_radar_repository.dart';
 import 'package:govipservices/features/travel/data/transport_company_repository.dart';
+import 'package:govipservices/features/travel/data/travel_repository.dart';
 import 'package:govipservices/features/travel/domain/models/transport_company.dart';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -37,6 +37,7 @@ class GoRadarMapPage extends StatefulWidget {
 class _GoRadarMapPageState extends State<GoRadarMapPage> {
   final GoRadarRepository _radarRepo = GoRadarRepository();
   final TransportCompanyRepository _companyRepo = TransportCompanyRepository();
+  final TravelRepository _travelRepo = TravelRepository();
   late final ParcelRoutePreviewService _routeService;
 
   GoogleMapController? _mapController;
@@ -139,13 +140,10 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
     if (same) return;
 
     try {
-      final QuerySnapshot<Map<String, dynamic>> snap = await FirebaseFirestore
-          .instance
-          .collection('voyageTrips')
-          .where('companyId', isEqualTo: company.id)
-          .get();
-      final Set<String> places = snap.docs
-          .map((d) => (d.data()['departurePlace'] as String? ?? '').trim())
+      final List<TripSearchResult> trips =
+          await _travelRepo.fetchTripsByCompanyName(company.name);
+      final Set<String> places = trips
+          .map((t) => t.departurePlace.trim())
           .where((s) => s.isNotEmpty)
           .toSet();
       if (!mounted) return;
@@ -169,17 +167,16 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
       _loadingArrivals = !same;
     });
     _cancelStream();
-    if (same) return;
+    if (same) {
+      return;
+    }
 
     try {
-      final QuerySnapshot<Map<String, dynamic>> snap = await FirebaseFirestore
-          .instance
-          .collection('voyageTrips')
-          .where('companyId', isEqualTo: _selectedCompany!.id)
-          .where('departurePlace', isEqualTo: dep)
-          .get();
-      final Set<String> places = snap.docs
-          .map((d) => (d.data()['arrivalPlace'] as String? ?? '').trim())
+      final List<TripSearchResult> trips =
+          await _travelRepo.fetchTripsByCompanyName(_selectedCompany!.name);
+      final Set<String> places = trips
+          .where((t) => t.departurePlace.trim() == dep)
+          .map((t) => t.arrivalPlace.trim())
           .where((s) => s.isNotEmpty)
           .toSet();
       if (!mounted) return;
@@ -229,7 +226,9 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
     if (_selectedCompany == null ||
         _selectedDeparture == null ||
         _selectedArrival == null ||
-        _selectedHour == null) return;
+        _selectedHour == null) {
+      return;
+    }
 
     final String hourPrefix = _selectedHour!.replaceAll('h', '');
 
