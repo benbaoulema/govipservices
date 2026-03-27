@@ -218,6 +218,13 @@ class _DrawerSheet extends StatelessWidget {
                       onTap: () =>
                           _navigate(context, AppRoutes.parcelsHistoryDriver),
                     ),
+                  _DrawerItem(
+                    icon: Icons.radar_rounded,
+                    label: 'GO Radar',
+                    subtitle: 'Reporter un voyage en direct',
+                    onTap: () =>
+                        _navigate(context, AppRoutes.travelGoRadarReporter),
+                  ),
                   _DrawerDivider(),
                   _DrawerItem(
                     icon: Icons.account_balance_wallet_rounded,

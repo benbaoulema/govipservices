@@ -11,6 +11,7 @@ import 'package:govipservices/features/parcels/presentation/pages/vip_shopping_p
 import 'package:govipservices/features/notifications/presentation/pages/notifications_page.dart';
 import 'package:govipservices/features/travel/presentation/pages/add_trip_page.dart';
 import 'package:govipservices/features/travel/presentation/pages/book_trip_page.dart';
+import 'package:govipservices/features/travel/presentation/pages/go_radar_reporter_page.dart';
 import 'package:govipservices/features/travel/presentation/pages/messages_page.dart';
 import 'package:govipservices/features/travel/presentation/pages/my_trips_page.dart';
 import 'package:govipservices/features/travel/presentation/navigation/trip_detail_route_factory.dart';
@@ -126,6 +127,11 @@ class AppRouter {
       case AppRoutes.travelMessages:
         return MaterialPageRoute<void>(
           builder: (_) => const MessagesPage(),
+          settings: settings,
+        );
+      case AppRoutes.travelGoRadarReporter:
+        return MaterialPageRoute<void>(
+          builder: (_) => const GoRadarReporterPage(),
           settings: settings,
         );
       case AppRoutes.wallet:
