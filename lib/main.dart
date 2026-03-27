@@ -9,6 +9,7 @@ import 'package:govipservices/firebase/firebase_env.dart';
 import 'package:govipservices/firebase/firebase_options_dev.dart';
 import 'package:govipservices/firebase/firebase_options_prod.dart';
 import 'package:govipservices/features/notifications/presentation/fcm_service.dart';
+import 'package:govipservices/features/travel/presentation/services/go_radar_reminder_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +33,13 @@ Future<void> main() async {
     debugPrint('Firebase init skipped: $error');
     debugPrintStack(stackTrace: stackTrace);
   }
+  // Initialise le service de rappels GO Radar (timezone + plugin)
+  unawaited(
+    GoRadarReminderService.instance.initialize().catchError(
+      (Object error) => debugPrint('GoRadarReminder init skipped: $error'),
+    ),
+  );
+
   runApp(const GoVipApp());
   if (firebaseReady) {
     unawaited(

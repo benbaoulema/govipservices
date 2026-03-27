@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
@@ -13,7 +11,7 @@ const String _channelName = 'GO Radar — Rappels reporter';
 
 // IDs réservés : 9100 à 9139 (40 rappels max planifiables)
 const int _baseId = 9100;
-const int _maxSlots = 40;
+const int _maxSlots = 100;
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -33,6 +31,8 @@ class GoRadarReminderService {
   bool _initialized = false;
 
   // ── Initialisation ─────────────────────────────────────────────────────────
+
+  Future<void> initialize() => _ensureInitialized();
 
   Future<void> _ensureInitialized() async {
     if (_initialized) return;
@@ -67,9 +67,7 @@ class GoRadarReminderService {
     await _ensureInitialized();
     await cancelAll();
 
-    if (Platform.isAndroid) {
-      await _requestAndroidPermission();
-    }
+    await _requestPermissions();
 
     final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
 
@@ -117,14 +115,23 @@ class GoRadarReminderService {
     debugPrint('[GoRadarReminder] Tous les rappels annulés');
   }
 
-  // ── Permission Android 13+ ────────────────────────────────────────────────
+  // ── Permissions ───────────────────────────────────────────────────────────
 
-  Future<void> _requestAndroidPermission() async {
+  Future<void> _requestPermissions() async {
+    // Android : notification + alarmes exactes
     final AndroidFlutterLocalNotificationsPlugin? androidPlugin =
         _plugin.resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
-    if (androidPlugin == null) return;
-    await androidPlugin.requestNotificationsPermission();
-    await androidPlugin.requestExactAlarmsPermission();
+    if (androidPlugin != null) {
+      await androidPlugin.requestNotificationsPermission();
+      await androidPlugin.requestExactAlarmsPermission();
+      return;
+    }
+
+    // iOS : demande alert + sound si pas encore accordé
+    final IOSFlutterLocalNotificationsPlugin? iosPlugin =
+        _plugin.resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin>();
+    await iosPlugin?.requestPermissions(alert: true, sound: true);
   }
 }

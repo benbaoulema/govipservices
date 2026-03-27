@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:govipservices/features/travel/data/go_radar_repository.dart';
 import 'package:govipservices/features/travel/presentation/services/go_radar_reminder_service.dart';
@@ -14,9 +15,16 @@ const Color _border = Color(0xFFD8F3EE);
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 class GoRadarUpdatePage extends StatefulWidget {
-  const GoRadarUpdatePage({super.key, required this.args});
+  const GoRadarUpdatePage({
+    super.key,
+    required this.args,
+    this.initialSession,
+    this.autoStartReminder = false,
+  });
 
   final GoRadarSessionArgs args;
+  final GoRadarSession? initialSession;
+  final bool autoStartReminder;
 
   @override
   State<GoRadarUpdatePage> createState() => _GoRadarUpdatePageState();
@@ -40,13 +48,12 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
 
   // Rappel périodique
   bool _reminderActive = false;
-  int _reminderMinutes = 10;
+  int _reminderMinutes = 30;
 
   @override
   void initState() {
     super.initState();
-    _openSession();
-    _fetchLocation();
+    _initialize();
   }
 
   @override
@@ -60,9 +67,28 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
 
   // ── Session ────────────────────────────────────────────────────────────────
 
+  Future<void> _initialize() async {
+    await _fetchLocation();
+    await _openSession();
+  }
+
   Future<void> _openSession() async {
     try {
-      final session = await _repo.openSession(widget.args);
+      final GoRadarSession session;
+      if (widget.initialSession != null) {
+        session = widget.initialSession!;
+      } else {
+        if (_position == null) {
+          throw const GoRadarException(
+            'Position requise pour ouvrir une session GO Radar.',
+          );
+        }
+        session = await _repo.openSession(
+          widget.args,
+          reporterLat: _position!.latitude,
+          reporterLng: _position!.longitude,
+        );
+      }
       if (!mounted) return;
       setState(() {
         _session = session;
@@ -70,6 +96,14 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
         _availableSeats = session.availableSeats;
         _loadingSession = false;
       });
+
+      if (!_reminderActive) {
+        await _toggleReminder(true);
+      }
+    } on GoRadarException catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingSession = false);
+      _showError(e.message);
     } catch (e) {
       if (!mounted) return;
       setState(() => _loadingSession = false);
@@ -101,11 +135,33 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
           timeLimit: Duration(seconds: 10),
         ),
       );
+
+      // Reverse geocoding → adresse lisible
+      String label;
+      try {
+        final List<Placemark> placemarks = await placemarkFromCoordinates(
+          pos.latitude,
+          pos.longitude,
+        );
+        if (placemarks.isNotEmpty) {
+          final Placemark p = placemarks.first;
+          final List<String> parts = <String>[
+            if (p.street != null && p.street!.isNotEmpty) p.street!,
+            if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality!,
+            if (p.locality != null && p.locality!.isNotEmpty) p.locality!,
+          ];
+          label = parts.isNotEmpty ? parts.join(', ') : 'Position localisée';
+        } else {
+          label = 'Position localisée';
+        }
+      } catch (_) {
+        label = 'Position localisée';
+      }
+
       if (!mounted) return;
       setState(() {
         _position = pos;
-        _locationLabel =
-            '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
+        _locationLabel = label;
         _fetchingLocation = false;
       });
     } catch (_) {
@@ -133,6 +189,19 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
             : null;
 
     try {
+      if (_status == GoRadarStatus.termine && _position == null) {
+        throw const GoRadarException(
+          'Position GPS requise pour terminer la session.',
+        );
+      }
+      if (_status == GoRadarStatus.termine && _position != null) {
+        await _repo.ensureCanCompleteSession(
+          _session!,
+          reporterLat: _position!.latitude,
+          reporterLng: _position!.longitude,
+        );
+      }
+
       await _repo.pushUpdate(
         sessionId: _session!.id,
         status: _status,
@@ -142,32 +211,41 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
         departureRealTime: departureRealTime,
       );
 
+      // Arrête les rappels si le voyage est terminé
+      if (_status == GoRadarStatus.termine) {
+        await GoRadarReminderService.instance.cancelAll();
+        if (mounted) setState(() => _reminderActive = false);
+      }
+
       if (!mounted) return;
       final h = now.hour.toString().padLeft(2, '0');
       final m = now.minute.toString().padLeft(2, '0');
       setState(() {
         _lastSentAt = '$h:$m';
         _sending = false;
-        if (departureRealTime != null) {
-          _session = GoRadarSession(
-            id: _session!.id,
-            tripId: _session!.tripId,
-            companyId: _session!.companyId,
-            companyName: _session!.companyName,
-            departure: _session!.departure,
-            arrival: _session!.arrival,
-            scheduledTime: _session!.scheduledTime,
-            slotNumber: _session!.slotNumber,
-            date: _session!.date,
-            status: _status,
-            availableSeats: _availableSeats,
-            reporterUid: _session!.reporterUid,
-            lastUpdatedAt: DateTime.now(),
-            lastLat: _position?.latitude,
-            lastLng: _position?.longitude,
-            departureRealTime: departureRealTime,
-          );
-        }
+        _session = GoRadarSession(
+          id: _session!.id,
+          tripId: _session!.tripId,
+          companyId: _session!.companyId,
+          companyName: _session!.companyName,
+          departure: _session!.departure,
+          arrival: _session!.arrival,
+          scheduledTime: _session!.scheduledTime,
+          slotNumber: _session!.slotNumber,
+          date: _session!.date,
+          status: _status,
+          availableSeats: _availableSeats,
+          reporterUid: _session!.reporterUid,
+          lastUpdatedAt: DateTime.now(),
+          departureLat: _session!.departureLat,
+          departureLng: _session!.departureLng,
+          arrivalLat: _session!.arrivalLat,
+          arrivalLng: _session!.arrivalLng,
+          lastLat: _position?.latitude,
+          lastLng: _position?.longitude,
+          departureRealTime:
+              departureRealTime ?? _session!.departureRealTime,
+        );
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -178,6 +256,10 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
           duration: const Duration(seconds: 2),
         ),
       );
+    } on GoRadarException catch (e) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      _showError(e.message);
     } catch (_) {
       if (!mounted) return;
       setState(() => _sending = false);
@@ -194,6 +276,36 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
           .start(intervalMinutes: _reminderMinutes);
     } else {
       await GoRadarReminderService.instance.cancelAll();
+    }
+  }
+
+  Future<void> _recordStop() async {
+    if (_session == null) return;
+    await _fetchLocation();
+    if (_position == null) {
+      _showError('Position GPS requise pour enregistrer un arrêt.');
+      return;
+    }
+    try {
+      await _repo.recordStop(
+        sessionId: _session!.id,
+        availableSeats: _availableSeats,
+        lat: _position!.latitude,
+        lng: _position!.longitude,
+        address: _locationLabel,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Arrêt enregistré'),
+          backgroundColor: _accentDark,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      _showError('Impossible d\'enregistrer l\'arrêt.');
     }
   }
 
@@ -233,80 +345,103 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
           ? const Center(
               child: CircularProgressIndicator(color: _accent, strokeWidth: 2.5),
             )
-          : ListView(
-              padding: const EdgeInsets.all(16),
+          : Column(
               children: [
-                _TripSummaryCard(args: widget.args),
-                const SizedBox(height: 16),
-                _StatusSelector(
-                  selected: _status,
-                  onSelect: (s) => setState(() => _status = s),
-                ),
-                const SizedBox(height: 16),
-                _SeatsSelector(
-                  value: _availableSeats,
-                  onChanged: (v) => setState(() => _availableSeats = v),
-                ),
-                const SizedBox(height: 16),
-                _LocationCard(
-                  label: _locationLabel,
-                  loading: _fetchingLocation,
-                  onRefresh: _fetchLocation,
-                ),
-                const SizedBox(height: 16),
-                _ReminderCard(
-                  active: _reminderActive,
-                  minutes: _reminderMinutes,
-                  onToggle: _toggleReminder,
-                  onMinutesChanged: (m) {
-                    setState(() => _reminderMinutes = m);
-                    if (_reminderActive) _toggleReminder(true); // replanifie
-                  },
-                ),
-                if (_lastSentAt != null) ...[
-                  const SizedBox(height: 12),
-                  Center(
-                    child: Text(
-                      'Dernière mise à jour envoyée à $_lastSentAt',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade500,
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                    children: [
+                      _TripSummaryCard(args: widget.args),
+                      const SizedBox(height: 16),
+                      _StatusSelector(
+                        selected: _status,
+                        onSelect: (s) => setState(() => _status = s),
                       ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 24),
-                SizedBox(
-                  height: 52,
-                  child: FilledButton.icon(
-                    onPressed: _sending ? null : _send,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _accentDark,
-                      disabledBackgroundColor: Colors.grey.shade200,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                      const SizedBox(height: 16),
+                      _SeatsSelector(
+                        value: _availableSeats,
+                        onChanged: (v) => setState(() => _availableSeats = v),
                       ),
-                    ),
-                    icon: _sending
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
+                      const SizedBox(height: 16),
+                      _LocationCard(
+                        label: _locationLabel,
+                        loading: _fetchingLocation,
+                        onRefresh: _fetchLocation,
+                      ),
+                      const SizedBox(height: 16),
+                      _ReminderCard(
+                        active: _reminderActive,
+                        minutes: _reminderMinutes,
+                        onToggle: _toggleReminder,
+                        onMinutesChanged: (m) {
+                          setState(() => _reminderMinutes = m);
+                          if (_reminderActive) _toggleReminder(true);
+                        },
+                      ),
+                      if (_lastSentAt != null) ...[
+                        const SizedBox(height: 12),
+                        Center(
+                          child: Text(
+                            'Dernière mise à jour envoyée à $_lastSentAt',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade500,
                             ),
-                          )
-                        : const Icon(Icons.send_rounded, size: 18),
-                    label: Text(
-                      _sending ? 'Envoi...' : 'Envoyer la mise à jour',
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 16),
+                Container(
+                  color: _bg,
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_status == GoRadarStatus.enRoute) ...[
+                        _StopButton(
+                          availableSeats: _availableSeats,
+                          position: _position,
+                          onRecord: _recordStop,
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: FilledButton.icon(
+                          onPressed: _sending ? null : _send,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _accentDark,
+                            disabledBackgroundColor: Colors.grey.shade200,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          icon: _sending
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.send_rounded, size: 18),
+                          label: Text(
+                            _sending ? 'Envoi...' : 'Envoyer la mise à jour',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
     );
@@ -752,6 +887,75 @@ class _ReminderCard extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+// ─── Bouton arrêt effectif ────────────────────────────────────────────────────
+
+class _StopButton extends StatefulWidget {
+  const _StopButton({
+    required this.availableSeats,
+    required this.position,
+    required this.onRecord,
+  });
+
+  final int availableSeats;
+  final Position? position;
+  final Future<void> Function() onRecord;
+
+  @override
+  State<_StopButton> createState() => _StopButtonState();
+}
+
+class _StopButtonState extends State<_StopButton> {
+  bool _recording = false;
+
+  Future<void> _tap() async {
+    if (_recording) return;
+    setState(() => _recording = true);
+    try {
+      await widget.onRecord();
+    } finally {
+      if (mounted) setState(() => _recording = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: OutlinedButton.icon(
+        onPressed: _recording ? null : _tap,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: _accentDark,
+          side: BorderSide(
+            color: _recording ? Colors.grey.shade300 : _accent,
+            width: 2,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        icon: _recording
+            ? SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  color: _accentDark,
+                  strokeWidth: 2,
+                ),
+              )
+            : const Icon(Icons.location_on_rounded, size: 20),
+        label: Text(
+          _recording ? 'Enregistrement...' : 'On vient de faire un arrêt',
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ),
     );
   }

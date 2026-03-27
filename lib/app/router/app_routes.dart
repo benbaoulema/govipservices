@@ -19,6 +19,7 @@ class AppRoutes {
   static const String travelMyTrips = '/travel/my-trips';
   static const String travelMessages = '/travel/messages';
   static const String travelGoRadarReporter = '/travel/go-radar-reporter';
+  static const String travelGoRadarMap = '/travel/go-radar-map';
 
   static const String wallet = '/wallet';
   static const String scratchCards = '/scratch-cards';

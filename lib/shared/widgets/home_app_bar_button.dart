@@ -220,10 +220,17 @@ class _DrawerSheet extends StatelessWidget {
                     ),
                   _DrawerItem(
                     icon: Icons.radar_rounded,
-                    label: 'GO Radar',
-                    subtitle: 'Reporter un voyage en direct',
+                    label: 'GO Radar — Reporter',
+                    subtitle: 'Signaler un voyage en direct',
                     onTap: () =>
                         _navigate(context, AppRoutes.travelGoRadarReporter),
+                  ),
+                  _DrawerItem(
+                    icon: Icons.map_rounded,
+                    label: 'GO Radar — Voyages',
+                    subtitle: 'Voir les bus en direct sur la carte',
+                    onTap: () =>
+                        _navigate(context, AppRoutes.travelGoRadarMap),
                   ),
                   _DrawerDivider(),
                   _DrawerItem(
