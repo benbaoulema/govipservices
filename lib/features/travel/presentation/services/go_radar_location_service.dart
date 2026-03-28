@@ -5,8 +5,8 @@ import 'package:govipservices/features/travel/data/go_radar_repository.dart';
 
 /// Service GPS automatique pour GO Radar.
 ///
-/// Démarre un stream de position dès qu'une session est ouverte et envoie
-/// silencieusement les coordonnées à Firestore à chaque déplacement significatif.
+/// Toutes les [intervalMinutes] minutes, capture la position GPS une seule fois
+/// et l'envoie silencieusement à Firestore — économique en batterie et en écritures.
 /// Survit à la fermeture de la page (app minimisée) mais s'arrête quand
 /// l'app est tuée ou quand [stop] est appelé explicitement.
 class GoRadarLocationService {
@@ -16,48 +16,59 @@ class GoRadarLocationService {
 
   final GoRadarRepository _repo = GoRadarRepository();
 
-  StreamSubscription<Position>? _sub;
+  Timer? _timer;
   String? _sessionId;
 
-  bool get isRunning => _sub != null;
+  bool get isRunning => _timer != null;
   String? get currentSessionId => _sessionId;
 
-  /// Démarre le suivi GPS pour [sessionId].
-  /// [distanceFilter] : distance minimale (mètres) entre deux envois.
+  /// Démarre le suivi GPS périodique pour [sessionId].
+  /// [intervalMinutes] : intervalle entre deux envois (défaut 10 min).
   void start({
     required String sessionId,
-    int distanceFilter = 20,
+    int intervalMinutes = 10,
   }) {
-    stop(); // annule tout stream précédent
+    stop(); // annule tout timer précédent
     _sessionId = sessionId;
 
-    _sub = Geolocator.getPositionStream(
-      locationSettings: LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: distanceFilter,
-      ),
-    ).listen(
-      (Position pos) async {
-        if (_sessionId == null) return;
-        try {
-          await _repo.pushLocationUpdate(
-            sessionId: _sessionId!,
-            lat: pos.latitude,
-            lng: pos.longitude,
-          );
-        } catch (_) {
-          // Échec réseau → on ignore silencieusement, on réessaiera au prochain event
-        }
-      },
-      onError: (_) {}, // GPS indisponible temporairement → on continue
-      cancelOnError: false,
+    // Envoi immédiat au démarrage
+    _pushPosition();
+
+    // Puis toutes les [intervalMinutes] minutes
+    _timer = Timer.periodic(
+      Duration(minutes: intervalMinutes),
+      (_) => _pushPosition(),
     );
+  }
+
+  Future<void> _pushPosition() async {
+    if (_sessionId == null) return;
+    try {
+      final LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return;
+      }
+      final Position pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+      await _repo.pushLocationUpdate(
+        sessionId: _sessionId!,
+        lat: pos.latitude,
+        lng: pos.longitude,
+      );
+    } catch (_) {
+      // Échec GPS ou réseau → on ignore, on réessaiera au prochain tick
+    }
   }
 
   /// Arrête le suivi GPS.
   void stop() {
-    _sub?.cancel();
-    _sub = null;
+    _timer?.cancel();
+    _timer = null;
     _sessionId = null;
   }
 }
