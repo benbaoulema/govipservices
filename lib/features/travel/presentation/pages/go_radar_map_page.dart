@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
@@ -58,6 +56,8 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
   bool _loadingDepartures = false;
   bool _loadingArrivals = false;
 
+  bool _inResultsMode = false;
+
   // ── Sessions ─────────────────────────────────────────────────────────────────
   StreamSubscription<List<GoRadarSession>>? _sessionsSub;
   List<GoRadarSession> _sessions = [];
@@ -88,25 +88,12 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
   // ── Icône bus ─────────────────────────────────────────────────────────────────
 
   Future<void> _loadBusIcon() async {
-    final BitmapDescriptor icon = await _emojiToBitmap('🚌', 48);
+    final BitmapDescriptor icon = await BitmapDescriptor.asset(
+      const ImageConfiguration(size: Size(72, 72)),
+      'assets/branding/car_gvip.png',
+    );
     if (!mounted) return;
     setState(() => _busIcon = icon);
-  }
-
-  Future<BitmapDescriptor> _emojiToBitmap(
-      String emoji, double fontSize) async {
-    final ui.PictureRecorder recorder = ui.PictureRecorder();
-    final Canvas canvas = Canvas(recorder);
-    final TextPainter tp = TextPainter(textDirection: TextDirection.ltr)
-      ..text = TextSpan(text: emoji, style: TextStyle(fontSize: fontSize))
-      ..layout();
-    tp.paint(canvas, Offset.zero);
-    final ui.Image img = await recorder
-        .endRecording()
-        .toImage(tp.width.ceil(), tp.height.ceil());
-    final ByteData? data =
-        await img.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
   }
 
   // ── Données ──────────────────────────────────────────────────────────────────
@@ -202,11 +189,15 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
   void _onHourSelected(String hour) {
     final bool same = hour == _selectedHour;
     setState(() => _selectedHour = same ? null : hour);
-    if (!same) {
-      _startStream();
-    } else {
-      _cancelStream();
-    }
+  }
+
+  void _search() {
+    setState(() => _inResultsMode = true);
+    _startStream();
+  }
+
+  void _backToFilters() {
+    _cancelStream();
   }
 
   // ── Stream sessions ───────────────────────────────────────────────────────────
@@ -218,6 +209,7 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
       _sessions = [];
       _markers = {};
       _polylines = {};
+      _inResultsMode = false;
     });
   }
 
@@ -256,21 +248,8 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
       final double? busLat = s.lastLat ?? s.departureLat;
       final double? busLng = s.lastLng ?? s.departureLng;
 
-      if (busLat != null && busLng != null) {
-        markers.add(Marker(
-          markerId: MarkerId(s.id),
-          position: LatLng(busLat, busLng),
-          icon: _busIcon ??
-              BitmapDescriptor.defaultMarkerWithHue(
-                  BitmapDescriptor.hueGreen),
-          infoWindow: InfoWindow(
-            title: '${s.departure} → ${s.arrival}',
-            snippet:
-                '${s.status.label}  •  ${s.availableSeats} place(s)  •  Dép. ${s.slotNumber}',
-          ),
-        ));
-      }
-
+      // Calcule tracé + bearing avant de créer le marker
+      double bearing = 0;
       if (s.departureLat != null &&
           s.departureLng != null &&
           s.arrivalLat != null &&
@@ -289,8 +268,13 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
 
         final List<LatLng> full = _routeCache[key] ?? [];
         if (full.isNotEmpty && busLat != null && busLng != null) {
-          final int idx =
-              _nearestIdx(full, LatLng(busLat, busLng));
+          final int idx = _nearestIdx(full, LatLng(busLat, busLng));
+          if (idx < full.length - 1) {
+            bearing = Geolocator.bearingBetween(
+              full[idx].latitude, full[idx].longitude,
+              full[idx + 1].latitude, full[idx + 1].longitude,
+            );
+          }
           if (idx > 0) {
             polylines.add(Polyline(
               polylineId: PolylineId('${s.id}_done'),
@@ -310,6 +294,23 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
             ));
           }
         }
+      }
+
+      if (busLat != null && busLng != null) {
+        markers.add(Marker(
+          markerId: MarkerId(s.id),
+          position: LatLng(busLat, busLng),
+          rotation: bearing,
+          anchor: const Offset(0.5, 0.5),
+          icon: _busIcon ??
+              BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueGreen),
+          infoWindow: InfoWindow(
+            title: '${s.departure} → ${s.arrival}',
+            snippet:
+                '${s.status.label}  •  ${s.availableSeats} place(s)  •  Dép. ${s.slotNumber}',
+          ),
+        ));
       }
     }
 
@@ -484,8 +485,38 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
                 onTap: _goToMyLocation),
           ),
 
-          // ── Sheet résultats (par-dessus le sheet filtres) ───────────
-          if (_sessions.isNotEmpty)
+          // ── Sheet filtres ───────────────────────────────────────────
+          if (!_inResultsMode)
+            DraggableScrollableSheet(
+              initialChildSize: 0.52,
+              minChildSize: 0.10,
+              maxChildSize: 0.88,
+              builder: (_, sc) => _FiltersSheet(
+                scrollController: sc,
+                companies: _companies,
+                loadingCompanies: _loadingCompanies,
+                selectedCompany: _selectedCompany,
+                onCompanySelected: _onCompanySelected,
+                departures: _departures,
+                loadingDepartures: _loadingDepartures,
+                selectedDeparture: _selectedDeparture,
+                onDepartureSelected: _onDepartureSelected,
+                arrivals: _arrivals,
+                loadingArrivals: _loadingArrivals,
+                selectedArrival: _selectedArrival,
+                onArrivalSelected: _onArrivalSelected,
+                selectedHour: _selectedHour,
+                onHourSelected: _onHourSelected,
+                canSearch: _selectedCompany != null &&
+                    _selectedDeparture != null &&
+                    _selectedArrival != null &&
+                    _selectedHour != null,
+                onSearch: _search,
+              ),
+            ),
+
+          // ── Sheet résultats ─────────────────────────────────────────
+          if (_inResultsMode)
             DraggableScrollableSheet(
               initialChildSize: 0.40,
               minChildSize: 0.10,
@@ -494,32 +525,9 @@ class _GoRadarMapPageState extends State<GoRadarMapPage> {
                 scrollController: sc,
                 sessions: _sessions,
                 onSessionTap: _onSessionTap,
+                onBack: _backToFilters,
               ),
             ),
-
-          // ── Sheet filtres ───────────────────────────────────────────
-          DraggableScrollableSheet(
-            initialChildSize: 0.52,
-            minChildSize: 0.10,
-            maxChildSize: 0.88,
-            builder: (_, sc) => _FiltersSheet(
-              scrollController: sc,
-              companies: _companies,
-              loadingCompanies: _loadingCompanies,
-              selectedCompany: _selectedCompany,
-              onCompanySelected: _onCompanySelected,
-              departures: _departures,
-              loadingDepartures: _loadingDepartures,
-              selectedDeparture: _selectedDeparture,
-              onDepartureSelected: _onDepartureSelected,
-              arrivals: _arrivals,
-              loadingArrivals: _loadingArrivals,
-              selectedArrival: _selectedArrival,
-              onArrivalSelected: _onArrivalSelected,
-              selectedHour: _selectedHour,
-              onHourSelected: _onHourSelected,
-            ),
-          ),
         ],
       ),
     );
@@ -545,6 +553,8 @@ class _FiltersSheet extends StatelessWidget {
     required this.onArrivalSelected,
     required this.selectedHour,
     required this.onHourSelected,
+    required this.canSearch,
+    required this.onSearch,
   });
 
   final ScrollController scrollController;
@@ -562,6 +572,8 @@ class _FiltersSheet extends StatelessWidget {
   final void Function(String) onArrivalSelected;
   final String? selectedHour;
   final void Function(String) onHourSelected;
+  final bool canSearch;
+  final VoidCallback onSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -662,6 +674,28 @@ class _FiltersSheet extends StatelessWidget {
             selected: selectedHour,
             enabled: selectedArrival != null,
             onSelect: onHourSelected,
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── Bouton Rechercher ────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: FilledButton.icon(
+              onPressed: canSearch ? onSearch : null,
+              icon: const Icon(Icons.search_rounded, size: 18),
+              label: const Text('Rechercher',
+                  style: TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w700)),
+              style: FilledButton.styleFrom(
+                backgroundColor: _accentDark,
+                disabledBackgroundColor: Colors.grey.shade200,
+                disabledForegroundColor: Colors.grey.shade400,
+                minimumSize: const Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
           ),
 
           SizedBox(
@@ -982,11 +1016,13 @@ class _ResultsSheet extends StatelessWidget {
     required this.scrollController,
     required this.sessions,
     required this.onSessionTap,
+    required this.onBack,
   });
 
   final ScrollController scrollController;
   final List<GoRadarSession> sessions;
   final void Function(GoRadarSession) onSessionTap;
+  final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -1014,6 +1050,24 @@ class _ResultsSheet extends StatelessWidget {
               decoration: BoxDecoration(
                   color: Colors.grey.shade300,
                   borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
+          // ── Bouton retour filtres ─────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            child: TextButton.icon(
+              onPressed: onBack,
+              icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                  size: 14, color: _accentDark),
+              label: const Text('Modifier la recherche',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: _accentDark)),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 4),
+              ),
             ),
           ),
           Padding(
@@ -1085,8 +1139,8 @@ class _SessionCard extends StatelessWidget {
 
   static Color _statusColor(GoRadarStatus s) => switch (s) {
         GoRadarStatus.chargement => Colors.orange,
+        GoRadarStatus.chargementEnCours => Colors.orange.shade700,
         GoRadarStatus.enRoute => _accentDark,
-        GoRadarStatus.arrive => Colors.blue.shade600,
         GoRadarStatus.termine => Colors.grey,
       };
 
@@ -1215,6 +1269,43 @@ class _SessionCard extends StatelessWidget {
                         fontStyle: FontStyle.italic)),
               ],
             ),
+            if (session.status == GoRadarStatus.enRoute &&
+                session.nextEstimatedCity != null) ...[
+              const SizedBox(height: 6),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Icon(Icons.navigation_rounded, size: 13, color: _accent),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Prochaine ville : ${session.nextEstimatedCity!}',
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: _accent),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (session.nextEstimatedDuration != null)
+                          Text(
+                            'Estimée à ${session.nextEstimatedDuration}',
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: _accent.withValues(alpha: 0.75)),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

@@ -449,7 +449,7 @@ class _SuccessBodyState extends State<_SuccessBody> {
     return nodes.asMap().entries.where((entry) {
       final int index = entry.key;
       final TripRouteNode node = entry.value;
-      return node.kind == 'stop' && index < segment.arrivalIndex;
+      return node.kind == 'stop' && node.bookable && index < segment.arrivalIndex;
     }).toList(growable: false);
   }
 
@@ -457,7 +457,7 @@ class _SuccessBodyState extends State<_SuccessBody> {
     return nodes.asMap().entries.where((entry) {
       final int index = entry.key;
       final TripRouteNode node = entry.value;
-      return node.kind == 'stop' && index > segment.departureIndex;
+      return node.kind == 'stop' && node.bookable && index > segment.departureIndex;
     }).toList(growable: false);
   }
 
@@ -1016,13 +1016,13 @@ class _SuccessBodyState extends State<_SuccessBody> {
                   _animateSection(
                     TripTimelineWidget(
                       segment: segment,
-                      showAlternativeDepartures: trip.intermediateStops.isNotEmpty,
+                      showAlternativeDepartures: _availableDepartureStops(state.nodes, segment).isNotEmpty,
                       onOpenAlternativeDepartures: () => _showDepartureOptions(
                         context,
                         nodes: state.nodes,
                         segment: segment,
                       ),
-                      showAlternativeArrivals: trip.intermediateStops.isNotEmpty,
+                      showAlternativeArrivals: _availableArrivalStops(state.nodes, segment).isNotEmpty,
                       onOpenAlternativeArrivals: () => _showArrivalOptions(
                         context,
                         nodes: state.nodes,
@@ -2298,9 +2298,7 @@ class TripTimelineWidget extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(segment.arrivalNode.address, style: const TextStyle(fontWeight: FontWeight.w700)),
                       if (showAlternativeArrivals && onOpenAlternativeArrivals != null) ...[
-                        const SizedBox(height: 6),
                         OutlinedButton.icon(
                           onPressed: onOpenAlternativeArrivals,
                           icon: const Icon(Icons.location_on_outlined, size: 16),
@@ -2319,7 +2317,9 @@ class TripTimelineWidget extends StatelessWidget {
                             ),
                           ),
                         ),
+                        const SizedBox(height: 6),
                       ],
+                      Text(segment.arrivalNode.address, style: const TextStyle(fontWeight: FontWeight.w700)),
                     ],
                   ),
                 ],

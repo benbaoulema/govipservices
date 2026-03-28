@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -7,27 +8,27 @@ const double _kGoRadarRadiusKm = 5;
 
 enum GoRadarStatus {
   chargement,
+  chargementEnCours,
   enRoute,
-  arrive,
   termine;
 
   String get label => switch (this) {
-        GoRadarStatus.chargement => 'Chargement en cours',
+        GoRadarStatus.chargement => 'Chargement non débuté',
+        GoRadarStatus.chargementEnCours => 'Chargement en cours',
         GoRadarStatus.enRoute => 'En route',
-        GoRadarStatus.arrive => 'Arrive a un arret',
         GoRadarStatus.termine => 'Termine',
       };
 
   String get value => switch (this) {
         GoRadarStatus.chargement => 'chargement',
+        GoRadarStatus.chargementEnCours => 'chargement_en_cours',
         GoRadarStatus.enRoute => 'en_route',
-        GoRadarStatus.arrive => 'arrive',
         GoRadarStatus.termine => 'termine',
       };
 
   static GoRadarStatus fromValue(String v) => switch (v) {
+        'chargement_en_cours' => GoRadarStatus.chargementEnCours,
         'en_route' => GoRadarStatus.enRoute,
-        'arrive' => GoRadarStatus.arrive,
         'termine' => GoRadarStatus.termine,
         _ => GoRadarStatus.chargement,
       };
@@ -111,6 +112,8 @@ class GoRadarSession {
     this.lastLat,
     this.lastLng,
     this.departureRealTime,
+    this.nextEstimatedCity,
+    this.nextEstimatedDuration,
   });
 
   final String id;
@@ -133,6 +136,8 @@ class GoRadarSession {
   final double? lastLat;
   final double? lastLng;
   final String? departureRealTime;
+  final String? nextEstimatedCity;
+  final String? nextEstimatedDuration;
 
   factory GoRadarSession.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final Map<String, dynamic> d = doc.data() ?? <String, dynamic>{};
@@ -158,8 +163,24 @@ class GoRadarSession {
       lastLat: (d['lastLat'] as num?)?.toDouble(),
       lastLng: (d['lastLng'] as num?)?.toDouble(),
       departureRealTime: d['departureRealTime'] as String?,
+      nextEstimatedCity: d['nextEstimatedCity'] as String?,
+      nextEstimatedDuration: d['nextEstimatedDuration'] as String?,
     );
   }
+}
+
+class GoRadarStop {
+  const GoRadarStop({
+    required this.address,
+    required this.lat,
+    required this.lng,
+    this.estimatedTime,
+  });
+
+  final String address;
+  final double lat;
+  final double lng;
+  final String? estimatedTime;
 }
 
 class _GoRadarPoint {
@@ -290,7 +311,7 @@ class GoRadarRepository {
       reporterLng: reporterLng,
       maxDistanceKm: maxDistanceKm,
       failureMessage:
-          'Vous devez etre a moins de 5 km du depart pour ouvrir cette session.',
+          'Vous devez etre sur les lieux pour ouvrir cette session.',
     );
 
     final DocumentReference<Map<String, dynamic>> ref = _sessions.doc();
@@ -357,7 +378,7 @@ class GoRadarRepository {
       reporterLng: reporterLng,
       maxDistanceKm: maxDistanceKm,
       failureMessage:
-          'Vous devez etre a moins de 5 km de l\'arrivee pour terminer la session.',
+          'Vous devez etre sur les lieux pour terminer la session.',
     );
   }
 
@@ -368,6 +389,8 @@ class GoRadarRepository {
     double? lat,
     double? lng,
     String? departureRealTime,
+    String? nextEstimatedCity,
+    String? nextEstimatedDuration,
   }) async {
     final FieldValue now = FieldValue.serverTimestamp();
 
@@ -378,6 +401,8 @@ class GoRadarRepository {
       if (lat != null) 'lastLat': lat,
       if (lng != null) 'lastLng': lng,
       if (departureRealTime != null) 'departureRealTime': departureRealTime,
+      if (nextEstimatedCity != null) 'nextEstimatedCity': nextEstimatedCity,
+      if (nextEstimatedDuration != null) 'nextEstimatedDuration': nextEstimatedDuration,
     };
 
     final Map<String, dynamic> historyEntry = <String, dynamic>{
@@ -440,6 +465,25 @@ class GoRadarRepository {
     });
   }
 
+  /// Retourne les arrêts intermédiaires du trip, ordonnés tels que saisis.
+  Future<List<GoRadarStop>> fetchIntermediateStops(String tripId) async {
+    final DocumentSnapshot<Map<String, dynamic>> snap =
+        await _firestore.collection('voyageTrips').doc(tripId).get();
+    final List<dynamic> raw =
+        (snap.data()?['intermediateStops'] as List<dynamic>?) ?? [];
+    return raw
+        .whereType<Map<String, dynamic>>()
+        .where((s) => s['selected'] != false)
+        .where((s) => s['lat'] != null && s['lng'] != null)
+        .map((s) => GoRadarStop(
+              address: s['address'] as String? ?? '',
+              lat: (s['lat'] as num).toDouble(),
+              lng: (s['lng'] as num).toDouble(),
+              estimatedTime: s['estimatedTime'] as String?,
+            ))
+        .toList();
+  }
+
   Stream<GoRadarSession?> watchSession(String sessionId) {
     return _sessions
         .doc(sessionId)
@@ -494,6 +538,7 @@ class GoRadarRepository {
     required double maxDistanceKm,
     required String failureMessage,
   }) {
+    if (kDebugMode) return;
     final double distanceMeters = Geolocator.distanceBetween(
       reporterLat,
       reporterLng,

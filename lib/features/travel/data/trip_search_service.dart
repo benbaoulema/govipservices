@@ -9,6 +9,7 @@ class TripStopModel {
     required this.priceFromDeparture,
     this.lat,
     this.lng,
+    this.bookable = true,
   });
 
   final String id;
@@ -17,6 +18,7 @@ class TripStopModel {
   final int priceFromDeparture;
   final double? lat;
   final double? lng;
+  final bool bookable;
 
   Map<String, dynamic> toMap() => <String, dynamic>{
         'id': id,
@@ -25,6 +27,7 @@ class TripStopModel {
         'priceFromDeparture': priceFromDeparture,
         'lat': lat,
         'lng': lng,
+        'bookable': bookable,
       };
 
   factory TripStopModel.fromMap(Map<String, dynamic> map) {
@@ -35,6 +38,7 @@ class TripStopModel {
       priceFromDeparture: _safeInt(map['priceFromDeparture'], 0),
       lat: _safeDouble(map['lat']),
       lng: _safeDouble(map['lng']),
+      bookable: map['bookable'] != false,
     );
   }
 }
@@ -300,7 +304,7 @@ List<TripRouteNode> buildTripRouteNodes(VoyageTripSearchItem trip) {
       lat: _safeDouble(trip.raw['departureLat']),
       lng: _safeDouble(trip.raw['departureLng']),
     ),
-    ...trip.intermediateStops.map(
+    ...trip.intermediateStops.where((s) => s.bookable).map(
       (s) => TripRouteNode(
         kind: 'stop',
         address: s.address,

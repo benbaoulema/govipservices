@@ -1016,6 +1016,7 @@ _TripCardSegmentView? buildTripCardSegmentView({
       (trip.raw['intermediateStops'] as List<dynamic>? ?? const <dynamic>[])
           .whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e))
+          .where((s) => s['bookable'] != false)
           .toList(growable: false);
 
   final List<_RouteNode> nodes = buildRouteNodes(

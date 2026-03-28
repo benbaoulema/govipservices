@@ -58,6 +58,7 @@ class _IntermediateStop {
     this.lng,
     this.selected = true,
     this.source = 'manual',
+    this.bookable = true,
   });
 
   final String id;
@@ -68,6 +69,7 @@ class _IntermediateStop {
   final double? lng;
   final bool selected;
   final String source;
+  final bool bookable;
 
   _IntermediateStop copyWith({
     String? id,
@@ -78,6 +80,7 @@ class _IntermediateStop {
     double? lng,
     bool? selected,
     String? source,
+    bool? bookable,
   }) {
     return _IntermediateStop(
       id: id ?? this.id,
@@ -88,6 +91,7 @@ class _IntermediateStop {
       lng: lng ?? this.lng,
       selected: selected ?? this.selected,
       source: source ?? this.source,
+      bookable: bookable ?? this.bookable,
     );
   }
 }
@@ -170,6 +174,7 @@ class _AddTripPageState extends State<AddTripPage> {
   DateTime? _departureDate;
   TimeOfDay? _departureTime;
   TimeOfDay? _manualStopTime;
+  bool _manualStopBookable = true;
   _RoutePoint _departurePoint = const _RoutePoint(address: '');
   _RoutePoint _arrivalPoint = const _RoutePoint(address: '');
   _RoutePoint? _manualStopPoint;
@@ -277,6 +282,7 @@ class _AddTripPageState extends State<AddTripPage> {
                   lng: (stop['lng'] as num?)?.toDouble(),
                   selected: stop['selected'] != false,
                   source: (stop['source'] ?? 'manual').toString(),
+                  bookable: stop['bookable'] != false,
                 ),
               )
               .toList(growable: false);
@@ -1281,11 +1287,12 @@ class _AddTripPageState extends State<AddTripPage> {
     return '${value.year}-$month-$day';
   }
 
-  String? _formatDurationMinutes(int? minutes) {
-    if (minutes == null || minutes <= 0) return null;
-    final int h = minutes ~/ 60;
-    final int m = minutes % 60;
-    return '${h}h${m.toString().padLeft(2, '0')}';
+  String? _computeArrivalTime(TimeOfDay? departure, int? durationMinutes) {
+    if (departure == null || durationMinutes == null || durationMinutes <= 0) return null;
+    final int totalMinutes = departure.hour * 60 + departure.minute + durationMinutes;
+    final int h = (totalMinutes ~/ 60) % 24;
+    final int m = totalMinutes % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
   }
 
   List<Map<String, dynamic>> _selectedStopsPayload() {
@@ -1300,6 +1307,7 @@ class _AddTripPageState extends State<AddTripPage> {
             'lat': stop.lat,
             'lng': stop.lng,
             'source': stop.source,
+            'bookable': stop.bookable,
           },
         )
         .toList(growable: false);
@@ -1314,7 +1322,7 @@ class _AddTripPageState extends State<AddTripPage> {
       'departureLng': _departurePoint.lng,
       'arrivalLat': _arrivalPoint.lat,
       'arrivalLng': _arrivalPoint.lng,
-      'arrivalEstimatedTime': _formatDurationMinutes(_routeTotalMinutes),
+      'arrivalEstimatedTime': _computeArrivalTime(_departureTime, _routeTotalMinutes),
       'currency': _currency,
       'vehiclePhotoUrl': vehiclePhotoUrl,
       'intermediateStops': _selectedStopsPayload(),
@@ -1387,12 +1395,14 @@ class _AddTripPageState extends State<AddTripPage> {
           priceFromDeparture: price < 0 ? 0 : price,
           lat: _manualStopPoint?.lat,
           lng: _manualStopPoint?.lng,
+          bookable: _manualStopBookable,
         ),
       );
       _manualStopAddressController.clear();
       _manualStopPriceController.text = '0';
       _manualStopTime = null;
       _manualStopPoint = null;
+      _manualStopBookable = true;
       _showManualStopForm = false;
     });
   }
@@ -1451,6 +1461,15 @@ class _AddTripPageState extends State<AddTripPage> {
     if (parsed == null) return;
     setState(() {
       _intermediateStops[idx] = current.copyWith(priceFromDeparture: parsed < 0 ? 0 : parsed);
+    });
+  }
+
+  void _toggleStopBookable(String id) {
+    setState(() {
+      final int idx = _intermediateStops.indexWhere((s) => s.id == id);
+      if (idx < 0) return;
+      final _IntermediateStop current = _intermediateStops[idx];
+      _intermediateStops[idx] = current.copyWith(bookable: !current.bookable);
     });
   }
 
@@ -1927,6 +1946,26 @@ class _AddTripPageState extends State<AddTripPage> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.confirmation_number_outlined,
+                        size: 18, color: Color(0xFF0A7B4F)),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text('Réservable',
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF0F172A))),
+                    ),
+                    Switch(
+                      value: _manualStopBookable,
+                      activeColor: const Color(0xFF0A7B4F),
+                      onChanged: (v) => setState(() => _manualStopBookable = v),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 10),
                 SizedBox(
                   width: double.infinity,
@@ -2054,6 +2093,26 @@ class _AddTripPageState extends State<AddTripPage> {
                                 ),
                               ],
                             ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Icon(Icons.confirmation_number_outlined,
+                                  size: 18, color: Color(0xFF0A7B4F)),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Text('Réservable',
+                                    style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF0F172A))),
+                              ),
+                              Switch(
+                                value: stop.bookable,
+                                activeColor: const Color(0xFF0A7B4F),
+                                onChanged: (_) => _toggleStopBookable(stop.id),
+                              ),
+                            ],
                           ),
                         ],
                       ),

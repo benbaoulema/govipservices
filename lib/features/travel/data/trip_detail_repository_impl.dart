@@ -27,6 +27,7 @@ class TripDetailRepositoryImpl implements TripDetailRepository {
             priceFromDeparture: _int(s['priceFromDeparture'], 0),
             lat: _doubleOrNull(s['lat']),
             lng: _doubleOrNull(s['lng']),
+            bookable: s['bookable'] != false,
           ),
         )
         .where((s) => s.address.trim().isNotEmpty)

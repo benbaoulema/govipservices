@@ -28,6 +28,7 @@ class TripStopModel {
     required this.priceFromDeparture,
     this.lat,
     this.lng,
+    this.bookable = true,
   });
 
   final String id;
@@ -36,6 +37,7 @@ class TripStopModel {
   final int priceFromDeparture;
   final double? lat;
   final double? lng;
+  final bool bookable;
 }
 
 class DriverInfoModel {
@@ -118,6 +120,7 @@ class TripRouteNode {
     required this.priceFromDeparture,
     this.lat,
     this.lng,
+    this.bookable = true,
   });
 
   final String kind;
@@ -126,6 +129,7 @@ class TripRouteNode {
   final int priceFromDeparture;
   final double? lat;
   final double? lng;
+  final bool bookable;
 
   TripRouteNode copyWith({
     String? kind,
@@ -134,6 +138,7 @@ class TripRouteNode {
     int? priceFromDeparture,
     double? lat,
     double? lng,
+    bool? bookable,
   }) {
     return TripRouteNode(
       kind: kind ?? this.kind,
@@ -142,6 +147,7 @@ class TripRouteNode {
       priceFromDeparture: priceFromDeparture ?? this.priceFromDeparture,
       lat: lat ?? this.lat,
       lng: lng ?? this.lng,
+      bookable: bookable ?? this.bookable,
     );
   }
 }

@@ -44,6 +44,9 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
   bool _fetchingLocation = false;
   String _locationLabel = 'Position non capturée';
 
+  List<GoRadarStop> _stops = [];
+  GoRadarStop? _nextStop;
+
   bool _sending = false;
   String? _lastSentAt;
 
@@ -69,8 +72,10 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
   // ── Session ────────────────────────────────────────────────────────────────
 
   Future<void> _initialize() async {
-    await _fetchLocation();
-    await _openSession();
+    // Étape 1 : coordonnées GPS rapides (précision moyenne suffit pour la vérif proximité)
+    await _fetchPositionFast();
+    // Étape 2 : ouverture session + geocoding du label en parallèle
+    await Future.wait([_openSession(), _enrichLocationLabel()]);
   }
 
   Future<void> _openSession() async {
@@ -100,6 +105,7 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
 
       // Démarre le GPS automatique (survit à la fermeture de la page)
       GoRadarLocationService.instance.start(sessionId: session.id);
+      _loadStops(session.tripId);
 
       if (!_reminderActive) {
         await _toggleReminder(true);
@@ -115,8 +121,119 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
     }
   }
 
+  // ── Stops intermédiaires ───────────────────────────────────────────────────
+
+  Future<void> _loadStops(String tripId) async {
+    try {
+      final List<GoRadarStop> stops =
+          await _repo.fetchIntermediateStops(tripId);
+      debugPrint('[GoRadar] tripId=$tripId stops=${stops.length} → ${stops.map((s) => s.address).join(', ')}');
+      if (!mounted) return;
+      setState(() => _stops = stops);
+      _computeNextCity();
+    } catch (e) {
+      debugPrint('[GoRadar] _loadStops error: $e');
+    }
+  }
+
+  void _computeNextCity() {
+    if (_stops.isEmpty || _session == null || _position == null) {
+      setState(() => _nextStop = null);
+      return;
+    }
+    final double depLat = _session!.departureLat ?? _position!.latitude;
+    final double depLng = _session!.departureLng ?? _position!.longitude;
+
+    final double busDistFromDep = Geolocator.distanceBetween(
+      depLat, depLng, _position!.latitude, _position!.longitude,
+    );
+
+    // Trie les stops par distance croissante depuis le départ
+    final List<GoRadarStop> sorted = List.of(_stops)
+      ..sort((a, b) {
+        final double da =
+            Geolocator.distanceBetween(depLat, depLng, a.lat, a.lng);
+        final double db =
+            Geolocator.distanceBetween(depLat, depLng, b.lat, b.lng);
+        return da.compareTo(db);
+      });
+
+    // Premier stop encore devant le bus
+    final GoRadarStop? next = sorted.cast<GoRadarStop?>().firstWhere(
+          (s) =>
+              Geolocator.distanceBetween(depLat, depLng, s!.lat, s.lng) >
+              busDistFromDep,
+          orElse: () => null,
+        );
+
+    setState(() => _nextStop = next);
+  }
+
   // ── GPS ────────────────────────────────────────────────────────────────────
 
+  /// Capture rapide (précision moyenne, 5 s) — utilisée au démarrage.
+  /// Sert uniquement à obtenir des coordonnées pour la vérif de proximité.
+  Future<void> _fetchPositionFast() async {
+    setState(() => _fetchingLocation = true);
+    try {
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.deniedForever ||
+          perm == LocationPermission.denied) {
+        if (!mounted) return;
+        setState(() {
+          _locationLabel = 'Permission GPS refusée';
+          _fetchingLocation = false;
+        });
+        return;
+      }
+      final Position pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 5),
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _position = pos;
+        _locationLabel = 'Position localisée';
+        _fetchingLocation = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _locationLabel = 'Position indisponible';
+        _fetchingLocation = false;
+      });
+    }
+  }
+
+  /// Reverse geocoding du label — lancé en parallèle de l'ouverture de session.
+  Future<void> _enrichLocationLabel() async {
+    if (_position == null) return;
+    try {
+      final List<Placemark> placemarks = await placemarkFromCoordinates(
+        _position!.latitude,
+        _position!.longitude,
+      );
+      if (!mounted) return;
+      if (placemarks.isNotEmpty) {
+        final Placemark p = placemarks.first;
+        final List<String> parts = <String>[
+          if (p.street != null && p.street!.isNotEmpty) p.street!,
+          if (p.subLocality != null && p.subLocality!.isNotEmpty)
+            p.subLocality!,
+          if (p.locality != null && p.locality!.isNotEmpty) p.locality!,
+        ];
+        setState(() =>
+            _locationLabel = parts.isNotEmpty ? parts.join(', ') : 'Position localisée');
+      }
+    } catch (_) {}
+  }
+
+  /// Rafraîchissement manuel (haute précision) — bouton refresh + avant envoi.
   Future<void> _fetchLocation() async {
     setState(() => _fetchingLocation = true);
     try {
@@ -133,41 +250,20 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
         });
         return;
       }
-      final pos = await Geolocator.getCurrentPosition(
+      final Position pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
           timeLimit: Duration(seconds: 10),
         ),
       );
-
-      // Reverse geocoding → adresse lisible
-      String label;
-      try {
-        final List<Placemark> placemarks = await placemarkFromCoordinates(
-          pos.latitude,
-          pos.longitude,
-        );
-        if (placemarks.isNotEmpty) {
-          final Placemark p = placemarks.first;
-          final List<String> parts = <String>[
-            if (p.street != null && p.street!.isNotEmpty) p.street!,
-            if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality!,
-            if (p.locality != null && p.locality!.isNotEmpty) p.locality!,
-          ];
-          label = parts.isNotEmpty ? parts.join(', ') : 'Position localisée';
-        } else {
-          label = 'Position localisée';
-        }
-      } catch (_) {
-        label = 'Position localisée';
-      }
-
       if (!mounted) return;
       setState(() {
         _position = pos;
-        _locationLabel = label;
+        _locationLabel = 'Position localisée';
         _fetchingLocation = false;
       });
+      await _enrichLocationLabel();
+      _computeNextCity();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -213,6 +309,8 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
         lat: _position?.latitude,
         lng: _position?.longitude,
         departureRealTime: departureRealTime,
+        nextEstimatedCity: _status == GoRadarStatus.enRoute ? _nextStop?.address : null,
+        nextEstimatedDuration: _status == GoRadarStatus.enRoute ? _nextStop?.estimatedTime : null,
       );
 
       // Arrête le GPS auto et les rappels si le voyage est terminé
@@ -334,7 +432,7 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
         backgroundColor: _surface,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20, color: _accent),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: const Text(
@@ -373,6 +471,10 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
                         loading: _fetchingLocation,
                         onRefresh: _fetchLocation,
                       ),
+                      if (_nextStop != null) ...[
+                        const SizedBox(height: 8),
+                        _NextCityRow(city: _nextStop!.address),
+                      ],
                       const SizedBox(height: 16),
                       _ReminderCard(
                         active: _reminderActive,
@@ -554,8 +656,8 @@ class _StatusSelector extends StatelessWidget {
 
   static IconData _icon(GoRadarStatus s) => switch (s) {
         GoRadarStatus.chargement => Icons.hourglass_top_rounded,
+        GoRadarStatus.chargementEnCours => Icons.hourglass_bottom_rounded,
         GoRadarStatus.enRoute => Icons.directions_bus_rounded,
-        GoRadarStatus.arrive => Icons.location_on_rounded,
         GoRadarStatus.termine => Icons.flag_rounded,
       };
 
@@ -795,6 +897,51 @@ class _LocationCard extends StatelessWidget {
               color: _accentDark,
               tooltip: 'Rafraîchir la position',
             ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Prochaine ville ──────────────────────────────────────────────────────────
+
+class _NextCityRow extends StatelessWidget {
+  const _NextCityRow({required this.city});
+
+  final String city;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: _accent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _accent.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.arrow_forward_rounded, size: 16, color: _accentDark),
+          const SizedBox(width: 8),
+          Text(
+            'Prochaine ville estimée : ',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey.shade600,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              city,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: _accentDark,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ],
       ),
     );

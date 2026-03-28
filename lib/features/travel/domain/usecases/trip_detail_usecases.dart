@@ -28,6 +28,7 @@ class BuildTripRouteNodesUseCase {
             priceFromDeparture: s.priceFromDeparture < 0 ? 0 : s.priceFromDeparture,
             lat: s.lat,
             lng: s.lng,
+            bookable: s.bookable,
           ),
         )
         .toList(growable: false);
