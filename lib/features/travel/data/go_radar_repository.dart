@@ -428,6 +428,18 @@ class GoRadarRepository {
     await batch.commit();
   }
 
+  Future<void> pushLocationUpdate({
+    required String sessionId,
+    required double lat,
+    required double lng,
+  }) async {
+    await _sessions.doc(sessionId).update(<String, dynamic>{
+      'lastLat': lat,
+      'lastLng': lng,
+      'lastUpdatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   Stream<GoRadarSession?> watchSession(String sessionId) {
     return _sessions
         .doc(sessionId)

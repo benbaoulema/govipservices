@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:govipservices/features/travel/data/go_radar_repository.dart';
+import 'package:govipservices/features/travel/presentation/services/go_radar_location_service.dart';
 import 'package:govipservices/features/travel/presentation/services/go_radar_reminder_service.dart';
 
 // ─── Couleurs ─────────────────────────────────────────────────────────────────
@@ -96,6 +97,9 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
         _availableSeats = session.availableSeats;
         _loadingSession = false;
       });
+
+      // Démarre le GPS automatique (survit à la fermeture de la page)
+      GoRadarLocationService.instance.start(sessionId: session.id);
 
       if (!_reminderActive) {
         await _toggleReminder(true);
@@ -211,8 +215,9 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
         departureRealTime: departureRealTime,
       );
 
-      // Arrête les rappels si le voyage est terminé
+      // Arrête le GPS auto et les rappels si le voyage est terminé
       if (_status == GoRadarStatus.termine) {
+        GoRadarLocationService.instance.stop();
         await GoRadarReminderService.instance.cancelAll();
         if (mounted) setState(() => _reminderActive = false);
       }
