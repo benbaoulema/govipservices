@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:govipservices/app/router/app_routes.dart';
+import 'package:govipservices/features/agent/data/agent_service.dart';
+import 'package:govipservices/features/agent/domain/models/agent_models.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -16,6 +18,7 @@ class HomeAppBarButton extends StatefulWidget {
 
 class _HomeAppBarButtonState extends State<HomeAppBarButton> {
   bool _isDriver = false;
+  Agent? _agent;
 
   @override
   void initState() {
@@ -27,14 +30,23 @@ class _HomeAppBarButtonState extends State<HomeAppBarButton> {
     final String? uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.isEmpty) return;
     try {
+      final results = await Future.wait([
+        FirebaseFirestore.instance.collection('users').doc(uid).get(),
+        AgentService.instance.fetchAgentByUserId(uid),
+      ]);
+      if (!mounted) return;
       final DocumentSnapshot<Map<String, dynamic>> doc =
-          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+          results[0] as DocumentSnapshot<Map<String, dynamic>>;
+      final Agent? agent = results[1] as Agent?;
       final Map<String, dynamic>? data = doc.data();
       final bool isDriver =
           (data?['capabilities'] as Map<String, dynamic>?)?['parcelsProvider'] ==
                   true ||
               data?['isServiceProvider'] == true;
-      if (mounted) setState(() => _isDriver = isDriver);
+      setState(() {
+        _isDriver = isDriver;
+        _agent = agent;
+      });
     } catch (_) {}
   }
 
@@ -52,7 +64,7 @@ class _HomeAppBarButtonState extends State<HomeAppBarButton> {
     return IconButton(
       tooltip: 'Menu',
       icon: const Icon(Icons.menu_rounded),
-      onPressed: () => _AppMenuDrawer.show(context, isDriver: _isDriver),
+      onPressed: () => _AppMenuDrawer.show(context, isDriver: _isDriver, agent: _agent),
     );
   }
 }
@@ -60,14 +72,14 @@ class _HomeAppBarButtonState extends State<HomeAppBarButton> {
 // ─── Drawer custom ────────────────────────────────────────────────────────────
 
 class _AppMenuDrawer {
-  static void show(BuildContext context, {required bool isDriver}) {
+  static void show(BuildContext context, {required bool isDriver, Agent? agent}) {
     showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
       barrierLabel: 'Fermer',
       barrierColor: Colors.black54,
       transitionDuration: const Duration(milliseconds: 280),
-      pageBuilder: (_, __, ___) => _DrawerSheet(isDriver: isDriver),
+      pageBuilder: (_, __, ___) => _DrawerSheet(isDriver: isDriver, agent: agent),
       transitionBuilder: (_, Animation<double> anim, __, Widget child) {
         final Animation<Offset> slide = Tween<Offset>(
           begin: const Offset(-1, 0),
@@ -80,9 +92,10 @@ class _AppMenuDrawer {
 }
 
 class _DrawerSheet extends StatelessWidget {
-  const _DrawerSheet({required this.isDriver});
+  const _DrawerSheet({required this.isDriver, this.agent});
 
   final bool isDriver;
+  final Agent? agent;
 
   static const Color _teal = Color(0xFF0F766E);
   static const Color _tealLight = Color(0xFF14B8A6);
@@ -196,71 +209,94 @@ class _DrawerSheet extends StatelessWidget {
 
                   const SizedBox(height: 12),
 
-                  // ── Items ─────────────────────────────────────────────
-                  _DrawerItem(
-                    icon: Icons.home_rounded,
-                    label: 'Accueil',
-                    onTap: () => _navigate(context, AppRoutes.home),
-                  ),
-                  _DrawerDivider(),
-                  _DrawerItem(
-                    icon: Icons.local_shipping_outlined,
-                    label: 'Mes livraisons',
-                    subtitle: 'Historique expéditeur',
-                    onTap: () =>
-                        _navigate(context, AppRoutes.parcelsHistorySender),
-                  ),
-                  if (isDriver)
-                    _DrawerItem(
-                      icon: Icons.two_wheeler_rounded,
-                      label: 'Mes courses livreur',
-                      subtitle: 'Historique conducteur',
-                      onTap: () =>
-                          _navigate(context, AppRoutes.parcelsHistoryDriver),
+                  // ── Items (scrollable) ────────────────────────────────
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          _DrawerItem(
+                            icon: Icons.home_rounded,
+                            label: 'Accueil',
+                            onTap: () => _navigate(context, AppRoutes.home),
+                          ),
+                          _DrawerDivider(),
+                          _DrawerItem(
+                            icon: Icons.local_shipping_outlined,
+                            label: 'Mes livraisons',
+                            subtitle: 'Historique expéditeur',
+                            onTap: () =>
+                                _navigate(context, AppRoutes.parcelsHistorySender),
+                          ),
+                          if (isDriver)
+                            _DrawerItem(
+                              icon: Icons.two_wheeler_rounded,
+                              label: 'Mes courses livreur',
+                              subtitle: 'Historique conducteur',
+                              onTap: () =>
+                                  _navigate(context, AppRoutes.parcelsHistoryDriver),
+                            ),
+                          _DrawerItem(
+                            icon: Icons.radar_rounded,
+                            label: 'GO Radar — Reporter',
+                            subtitle: 'Signaler un voyage en direct',
+                            onTap: () =>
+                                _navigate(context, AppRoutes.travelGoRadarReporter),
+                          ),
+                          _DrawerItem(
+                            icon: Icons.map_rounded,
+                            label: 'GO Radar — Voyages',
+                            subtitle: 'Voir les bus en direct sur la carte',
+                            onTap: () =>
+                                _navigate(context, AppRoutes.travelGoRadarMap),
+                          ),
+                          if (agent != null) ...[
+                            _DrawerDivider(),
+                            _DrawerItem(
+                              icon: Icons.point_of_sale_rounded,
+                              label: 'Encaisser espèces',
+                              subtitle: 'Générer un code de paiement',
+                              onTap: () {
+                                Navigator.of(context).pop();
+                                Navigator.of(context).pushNamed(
+                                  AppRoutes.agentCashCollection,
+                                  arguments: agent,
+                                );
+                              },
+                            ),
+                          ],
+                          _DrawerDivider(),
+                          _DrawerItem(
+                            icon: Icons.account_balance_wallet_rounded,
+                            label: 'Portefeuille',
+                            subtitle: 'Solde & transactions',
+                            onTap: () => _navigate(context, AppRoutes.wallet),
+                          ),
+                          _DrawerItem(
+                            icon: Icons.auto_awesome_rounded,
+                            label: 'Cartes à gratter',
+                            subtitle: 'Récompenses & offres',
+                            onTap: () => _navigate(context, AppRoutes.scratchCards),
+                          ),
+                          _DrawerDivider(),
+                          _DrawerItem(
+                            icon: Icons.person_outline_rounded,
+                            label: 'Mon compte',
+                            onTap: () => _navigate(context, AppRoutes.userAccount),
+                          ),
+                          _DrawerItem(
+                            icon: Icons.notifications_outlined,
+                            label: 'Notifications',
+                            onTap: () =>
+                                _navigate(context, AppRoutes.userNotifications),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                      ),
                     ),
-                  _DrawerItem(
-                    icon: Icons.radar_rounded,
-                    label: 'GO Radar — Reporter',
-                    subtitle: 'Signaler un voyage en direct',
-                    onTap: () =>
-                        _navigate(context, AppRoutes.travelGoRadarReporter),
-                  ),
-                  _DrawerItem(
-                    icon: Icons.map_rounded,
-                    label: 'GO Radar — Voyages',
-                    subtitle: 'Voir les bus en direct sur la carte',
-                    onTap: () =>
-                        _navigate(context, AppRoutes.travelGoRadarMap),
-                  ),
-                  _DrawerDivider(),
-                  _DrawerItem(
-                    icon: Icons.account_balance_wallet_rounded,
-                    label: 'Portefeuille',
-                    subtitle: 'Solde & transactions',
-                    onTap: () => _navigate(context, AppRoutes.wallet),
-                  ),
-                  _DrawerItem(
-                    icon: Icons.auto_awesome_rounded,
-                    label: 'Cartes à gratter',
-                    subtitle: 'Récompenses & offres',
-                    onTap: () => _navigate(context, AppRoutes.scratchCards),
-                  ),
-                  _DrawerDivider(),
-                  _DrawerItem(
-                    icon: Icons.person_outline_rounded,
-                    label: 'Mon compte',
-                    onTap: () => _navigate(context, AppRoutes.userAccount),
-                  ),
-                  _DrawerItem(
-                    icon: Icons.notifications_outlined,
-                    label: 'Notifications',
-                    onTap: () =>
-                        _navigate(context, AppRoutes.userNotifications),
                   ),
 
-                  const Spacer(),
-
-                  // ── Bas : version ou déconnexion ──────────────────────
+                  // ── Bas : version ─────────────────────────────────────
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
                     child: Text(

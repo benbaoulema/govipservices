@@ -40,6 +40,7 @@ class CreateVoyageBookingInput {
     this.comfortOptions = const <String>[],
     this.appliedRewardIds = const <String>[],
     this.studentDiscount = 0,
+    this.checkoutDiscount = 0,
   });
 
   final String tripId;
@@ -56,6 +57,8 @@ class CreateVoyageBookingInput {
   final List<String> appliedRewardIds;
   /// Remise étudiante transiente (non persistée en user_rewards).
   final int studentDiscount;
+  /// Remise carte à gratter checkout (non persistée en user_rewards).
+  final int checkoutDiscount;
   final String segmentFrom;
   final String segmentTo;
   final int segmentPrice;

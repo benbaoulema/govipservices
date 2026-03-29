@@ -23,4 +23,6 @@ class AppRoutes {
 
   static const String wallet = '/wallet';
   static const String scratchCards = '/scratch-cards';
+
+  static const String agentCashCollection = '/agent/cash-collection';
 }
