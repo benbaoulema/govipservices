@@ -18,6 +18,24 @@ class RewardConfig {
   final double? value;
 
   bool get isNothing => type == 'nothing';
+  bool get isPercent => type == 'discount_percent';
+
+  /// Montant de réduction en XOF. Pour discount_percent, [totalAmount] requis.
+  int effectiveDiscount({int? totalAmount}) {
+    if (value == null) return 0;
+    if (isPercent) {
+      if (totalAmount == null) return 0;
+      return (totalAmount * value! / 100).round();
+    }
+    return value!.round();
+  }
+
+  /// "10%" pour discount_percent, "500 XOF" pour discount_fixed.
+  String get valueLabel {
+    if (value == null) return '';
+    if (isPercent) return '${value!.toStringAsFixed(0)}%';
+    return '${value!.toStringAsFixed(0)} XOF';
+  }
 
   factory RewardConfig.fromMap(Map<String, dynamic> m) {
     return RewardConfig(
@@ -40,6 +58,7 @@ class ScratchCampaign {
     this.departureLocation,
     this.arrivalLocation,
     this.targetAudience,
+    this.trigger,
     this.rewardsPool = const <RewardConfig>[],
   });
 
@@ -49,6 +68,8 @@ class ScratchCampaign {
   final String? departureLocation;
   final String? arrivalLocation;
   final String? targetAudience;
+  /// Déclencheur contextuel, ex: 'booking_checkout'.
+  final String? trigger;
   final List<RewardConfig> rewardsPool;
 
   bool get hasRoute => departureLocation != null && arrivalLocation != null;
@@ -65,6 +86,7 @@ class ScratchCampaign {
       departureLocation: d['departureLocation'] as String?,
       arrivalLocation: d['arrivalLocation'] as String?,
       targetAudience: d['targetAudience'] as String?,
+      trigger: d['trigger'] as String?,
       rewardsPool: (d['rewardsPool'] as List<dynamic>? ?? const <dynamic>[])
           .whereType<Map>()
           .map((e) => RewardConfig.fromMap(Map<String, dynamic>.from(e)))

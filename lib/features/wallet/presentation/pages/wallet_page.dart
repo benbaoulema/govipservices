@@ -54,6 +54,9 @@ class WalletPage extends StatelessWidget {
                     balance: wallet.balance,
                     currency: wallet.currency,
                     onRecharge: () => _openRechargeSheet(context, uid),
+                    onRetrait: wallet.balance > 0
+                        ? () => _openRetraitSheet(context, uid, wallet.balance)
+                        : null,
                   ),
                   const SizedBox(height: 20),
 
@@ -97,6 +100,15 @@ class WalletPage extends StatelessWidget {
       builder: (_) => _RechargeSheet(uid: uid),
     );
   }
+
+  Future<void> _openRetraitSheet(BuildContext context, String uid, int balance) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _RetraitSheet(uid: uid, balance: balance),
+    );
+  }
 }
 
 // ── Balance Card ──────────────────────────────────────────────────────────────
@@ -106,11 +118,13 @@ class _BalanceCard extends StatelessWidget {
     required this.balance,
     required this.currency,
     required this.onRecharge,
+    this.onRetrait,
   });
 
   final int balance;
   final String currency;
   final VoidCallback onRecharge;
+  final VoidCallback? onRetrait;
 
   @override
   Widget build(BuildContext context) {
@@ -187,19 +201,38 @@ class _BalanceCard extends StatelessWidget {
               ),
             ),
           const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: onRecharge,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Colors.white60),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onRecharge,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white60),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Recharger', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
               ),
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Recharger', style: TextStyle(fontWeight: FontWeight.w700)),
-            ),
+              if (onRetrait != null) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: onRetrait,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: _accentDark,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.arrow_upward_rounded, size: 18),
+                    label: const Text('Retirer', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),
@@ -294,10 +327,11 @@ class _TransactionTile extends StatelessWidget {
 
   IconData _iconForType(String type) {
     switch (type) {
-      case 'commission': return Icons.percent_rounded;
-      case 'recharge':   return Icons.add_circle_outline_rounded;
-      case 'retrait':    return Icons.arrow_upward_rounded;
-      default:           return Icons.swap_horiz_rounded;
+      case 'commission':       return Icons.percent_rounded;
+      case 'recharge':         return Icons.add_circle_outline_rounded;
+      case 'retrait':          return Icons.arrow_upward_rounded;
+      case 'reporter_reward':  return Icons.radar_rounded;
+      default:                 return Icons.swap_horiz_rounded;
     }
   }
 }
@@ -522,6 +556,206 @@ class _RechargeSheetState extends State<_RechargeSheet> {
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.check_circle_rounded),
                   label: const Text('Confirmer la recharge'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Retrait Sheet ─────────────────────────────────────────────────────────────
+
+class _RetraitSheet extends StatefulWidget {
+  const _RetraitSheet({required this.uid, required this.balance});
+  final String uid;
+  final int balance;
+
+  @override
+  State<_RetraitSheet> createState() => _RetraitSheetState();
+}
+
+class _RetraitSheetState extends State<_RetraitSheet> {
+  final TextEditingController _phoneController = TextEditingController();
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  bool get _canConfirm => _phoneController.text.trim().isNotEmpty;
+
+  Future<void> _confirm() async {
+    setState(() => _loading = true);
+    try {
+      await WalletService.instance.requestRetrait(
+        uid: widget.uid,
+        amount: widget.balance,
+        wavePhone: _phoneController.text.trim(),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: _accentDark,
+          content: Text('Demande de retrait de ${widget.balance} XOF envoyée.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.red.shade700,
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD1D9E6),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+
+              // Header
+              Row(
+                children: [
+                  Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(color: _accentSoft, borderRadius: BorderRadius.circular(12)),
+                    child: const Icon(Icons.arrow_upward_rounded, color: _accentDark, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Retirer via Wave',
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Color(0xFF10233E))),
+                        Text('Solde disponible : ${widget.balance} XOF',
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF7A8CA8))),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+
+              // Montant à retirer (non modifiable — tout le solde)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0F4F8),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFD1D9E6)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.payments_outlined, color: _accentDark, size: 20),
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Montant à retirer',
+                            style: TextStyle(fontSize: 11, color: Color(0xFF7A8CA8))),
+                        Text('${widget.balance} XOF',
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFF10233E))),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Image Wave + champ numéro
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Image.asset(
+                  'assets/wave.jpg',
+                  width: double.infinity,
+                  height: 100,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    height: 100,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1A56DB).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Center(
+                      child: Icon(Icons.waves_rounded, color: Color(0xFF1A56DB), size: 36),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text('Numéro Wave',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF4A5568))),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _phoneController,
+                keyboardType: TextInputType.phone,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Ex: +225 07 00 00 00 00',
+                  prefixIcon: const Icon(Icons.phone_rounded, size: 18),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Le montant sera envoyé sur ce numéro Wave après validation.',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+              ),
+              const SizedBox(height: 20),
+
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF1A56DB),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                  ),
+                  onPressed: _canConfirm && !_loading ? _confirm : null,
+                  icon: _loading
+                      ? const SizedBox(width: 18, height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.send_rounded, size: 18),
+                  label: const Text('Confirmer le retrait'),
                 ),
               ),
             ],

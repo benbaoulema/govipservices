@@ -31,6 +31,32 @@ class ScratchService {
     return ScratchCampaign.fromFirestore(snap.docs.first);
   }
 
+  /// Retourne la campagne active associée à un trigger contextuel (ex: 'booking_checkout').
+  Future<ScratchCampaign?> fetchCampaignByTrigger(String trigger) async {
+    final QuerySnapshot<Map<String, dynamic>> snap = await _db
+        .collection('scratchCampaigns')
+        .where('trigger', isEqualTo: trigger)
+        .get();
+    for (final doc in snap.docs) {
+      if (doc.data()['isActive'] == true) {
+        return ScratchCampaign.fromFirestore(doc);
+      }
+    }
+    return null;
+  }
+
+  /// Retourne la campagne active ciblant les reporters GO Radar.
+  Future<ScratchCampaign?> fetchReporterCampaign() async {
+    final QuerySnapshot<Map<String, dynamic>> snap = await _db
+        .collection('scratchCampaigns')
+        .where('isActive', isEqualTo: true)
+        .where('targetAudience', isEqualTo: 'go_radar_reporters')
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return ScratchCampaign.fromFirestore(snap.docs.first);
+  }
+
   /// Retourne la campagne active ciblant les étudiants/élèves.
   Future<ScratchCampaign?> fetchStudentCampaign() async {
     final QuerySnapshot<Map<String, dynamic>> snap = await _db

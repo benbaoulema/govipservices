@@ -254,6 +254,7 @@ class _GoRadarReporterPageState extends State<GoRadarReporterPage> {
       departureLng: (trip.raw['departureLng'] as num?)?.toDouble(),
       arrivalLat: (trip.raw['arrivalLat'] as num?)?.toDouble(),
       arrivalLng: (trip.raw['arrivalLng'] as num?)?.toDouble(),
+      tripPrice: trip.pricePerSeat?.round(),
     );
 
     setState(() => _confirming = true);

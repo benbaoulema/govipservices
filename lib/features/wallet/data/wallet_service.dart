@@ -87,6 +87,105 @@ class WalletService {
     });
   }
 
+  // ── Récompense reporter ──────────────────────────────────────────────────────
+
+  /// Crédite le wallet du reporter avec le montant de sa récompense GO Radar.
+  Future<void> creditReporterReward({
+    required String uid,
+    required int amount,
+    required String tripRoute,
+  }) async {
+    if (amount <= 0) return;
+
+    final DocumentReference<Map<String, dynamic>> walletRef = _walletRef(uid);
+
+    await _db.runTransaction((tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> snap = await tx.get(walletRef);
+      final int current =
+          snap.exists ? (snap.data()?['balance'] as num? ?? 0).toInt() : 0;
+
+      final Map<String, dynamic> walletData = <String, dynamic>{
+        'balance': current + amount,
+        'currency': 'XOF',
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      if (snap.exists) {
+        tx.update(walletRef, walletData);
+      } else {
+        tx.set(walletRef, walletData);
+      }
+
+      final DocumentReference<Map<String, dynamic>> txRef = _txRef(uid).doc();
+      tx.set(txRef, WalletTransaction(
+        id: txRef.id,
+        amount: amount,
+        type: 'reporter_reward',
+        description: 'Récompense GO Radar — $tripRoute',
+        reference: '',
+      ).toMap());
+    });
+  }
+
+  // ── Retrait ───────────────────────────────────────────────────────────────
+
+  /// Enregistre une demande de retrait Wave :
+  /// - Déduit le solde immédiatement (statut pending)
+  /// - Crée une transaction 'retrait' dans le wallet
+  /// - Enregistre la demande dans walletWithdrawals
+  Future<void> requestRetrait({
+    required String uid,
+    required int amount,
+    required String wavePhone,
+  }) async {
+    if (amount <= 0) return;
+
+    final DocumentReference<Map<String, dynamic>> walletRef = _walletRef(uid);
+    final DocumentReference<Map<String, dynamic>> withdrawalRef =
+        _db.collection('walletWithdrawals').doc();
+
+    await _db.runTransaction((tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> snap = await tx.get(walletRef);
+      final int current =
+          snap.exists ? (snap.data()?['balance'] as num? ?? 0).toInt() : 0;
+
+      if (current < amount) {
+        throw Exception('Solde insuffisant.');
+      }
+
+      final Map<String, dynamic> walletData = <String, dynamic>{
+        'balance': current - amount,
+        'currency': 'XOF',
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      if (snap.exists) {
+        tx.update(walletRef, walletData);
+      } else {
+        tx.set(walletRef, walletData);
+      }
+
+      final DocumentReference<Map<String, dynamic>> txRef = _txRef(uid).doc();
+      tx.set(txRef, WalletTransaction(
+        id: txRef.id,
+        amount: -amount,
+        type: 'retrait',
+        description: 'Retrait Wave — $wavePhone',
+        reference: wavePhone,
+        method: 'wave',
+        status: 'pending',
+      ).toMap());
+
+      tx.set(withdrawalRef, <String, dynamic>{
+        'uid': uid,
+        'amount': amount,
+        'wavePhone': wavePhone,
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
   // ── Recharge ─────────────────────────────────────────────────────────────
 
   /// Records a top-up request (pending until confirmed by payment provider).

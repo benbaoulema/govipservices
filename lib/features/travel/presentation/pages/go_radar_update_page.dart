@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:govipservices/features/scratch/data/scratch_service.dart';
+import 'package:govipservices/features/scratch/domain/models/scratch_models.dart';
+import 'package:govipservices/features/scratch/presentation/pages/reporter_reward_sheet.dart';
 import 'package:govipservices/features/travel/data/go_radar_repository.dart';
 import 'package:govipservices/features/travel/presentation/services/go_radar_location_service.dart';
 import 'package:govipservices/features/travel/presentation/services/go_radar_reminder_service.dart';
@@ -318,6 +321,7 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
         GoRadarLocationService.instance.stop();
         await GoRadarReminderService.instance.cancelAll();
         if (mounted) setState(() => _reminderActive = false);
+        _triggerReporterReward();
       }
 
       if (!mounted) return;
@@ -346,8 +350,8 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
           arrivalLng: _session!.arrivalLng,
           lastLat: _position?.latitude,
           lastLng: _position?.longitude,
-          departureRealTime:
-              departureRealTime ?? _session!.departureRealTime,
+          departureRealTime: departureRealTime ?? _session!.departureRealTime,
+          tripPrice: widget.args.tripPrice,
         );
       });
 
@@ -409,6 +413,23 @@ class _GoRadarUpdatePageState extends State<GoRadarUpdatePage> {
     } catch (_) {
       if (!mounted) return;
       _showError('Impossible d\'enregistrer l\'arrêt.');
+    }
+  }
+
+  Future<void> _triggerReporterReward() async {
+    await Future.delayed(const Duration(milliseconds: 800));
+    if (!mounted) return;
+    try {
+      final ScratchCampaign? campaign =
+          await ScratchService.instance.fetchReporterCampaign();
+      if (!mounted || campaign == null || campaign.rewardsPool.isEmpty) return;
+      await showReporterRewardSheet(
+        context,
+        campaign: campaign,
+        tripPrice: widget.args.tripPrice,
+      );
+    } catch (e) {
+      debugPrint('[GoRadar] reporter reward error: $e');
     }
   }
 

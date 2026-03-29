@@ -57,6 +57,7 @@ class GoRadarSessionArgs {
     this.departureLng,
     this.arrivalLat,
     this.arrivalLng,
+    this.tripPrice,
   });
 
   final String tripId;
@@ -71,6 +72,7 @@ class GoRadarSessionArgs {
   final double? departureLng;
   final double? arrivalLat;
   final double? arrivalLng;
+  final int? tripPrice;
 
   factory GoRadarSessionArgs.fromSession(GoRadarSession session) {
     return GoRadarSessionArgs(
@@ -86,6 +88,7 @@ class GoRadarSessionArgs {
       departureLng: session.departureLng,
       arrivalLat: session.arrivalLat,
       arrivalLng: session.arrivalLng,
+      tripPrice: session.tripPrice,
     );
   }
 }
@@ -114,6 +117,7 @@ class GoRadarSession {
     this.departureRealTime,
     this.nextEstimatedCity,
     this.nextEstimatedDuration,
+    this.tripPrice,
   });
 
   final String id;
@@ -138,6 +142,7 @@ class GoRadarSession {
   final String? departureRealTime;
   final String? nextEstimatedCity;
   final String? nextEstimatedDuration;
+  final int? tripPrice;
 
   factory GoRadarSession.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final Map<String, dynamic> d = doc.data() ?? <String, dynamic>{};
@@ -165,6 +170,7 @@ class GoRadarSession {
       departureRealTime: d['departureRealTime'] as String?,
       nextEstimatedCity: d['nextEstimatedCity'] as String?,
       nextEstimatedDuration: d['nextEstimatedDuration'] as String?,
+      tripPrice: (d['tripPrice'] as num?)?.toInt(),
     );
   }
 }
@@ -334,6 +340,7 @@ class GoRadarRepository {
       'arrivalLng': arrivalPoint.lng,
       'lastUpdatedAt': FieldValue.serverTimestamp(),
       'createdAt': FieldValue.serverTimestamp(),
+      if (args.tripPrice != null) 'tripPrice': args.tripPrice,
     });
 
     return GoRadarSession(
@@ -354,6 +361,7 @@ class GoRadarRepository {
       departureLng: departurePoint.lng,
       arrivalLat: arrivalPoint.lat,
       arrivalLng: arrivalPoint.lng,
+      tripPrice: args.tripPrice,
     );
   }
 
