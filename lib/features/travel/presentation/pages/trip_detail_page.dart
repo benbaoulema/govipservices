@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -24,6 +25,7 @@ import 'package:govipservices/features/travel/domain/models/additional_service_m
 import 'package:govipservices/features/scratch/data/scratch_service.dart';
 import 'package:govipservices/features/scratch/domain/models/scratch_models.dart';
 import 'package:govipservices/features/scratch/presentation/pages/student_scratch_sheet.dart';
+import 'package:govipservices/features/scratch/presentation/pages/checkout_scratch_sheet.dart';
 
 const Color _travelAccent = Color(0xFF14B8A6);
 const Color _travelAccentDark = Color(0xFF0F766E);
@@ -1360,6 +1362,7 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
           comfortOptions: selectedOptions,
           appliedRewardIds: eligibleRewards.map((r) => r.id).toList(growable: false),
           studentDiscount: paymentResult.studentDiscount,
+          checkoutDiscount: paymentResult.checkoutDiscount,
           segmentFrom: widget.segment.departureNode.address,
           segmentTo: widget.segment.arrivalNode.address,
           segmentPrice: widget.segment.segmentPrice,
@@ -3796,8 +3799,9 @@ class _HomeAddressSheetState extends State<_HomeAddressSheet> {
 // ── Payment Sheet ───────────────────────────────────────────────────────────
 
 class _PaymentResult {
-  const _PaymentResult({this.studentDiscount = 0});
+  const _PaymentResult({this.studentDiscount = 0, this.checkoutDiscount = 0});
   final int studentDiscount;
+  final int checkoutDiscount;
 }
 
 enum _PaymentMethod { wave, orangeMoney }
@@ -3827,9 +3831,10 @@ class _PaymentSheetState extends State<_PaymentSheet> {
   bool _isStudent = false;
   bool _loadingStudentCampaign = false;
   int _studentDiscount = 0;
+  int _checkoutDiscount = 0;
 
   int get _totalDiscount => widget.eligibleRewards.fold(0, (acc, r) => acc + r.effectiveValue.round());
-  int get _effectiveTotal => (widget.totalAmount - _totalDiscount - _studentDiscount).clamp(0, widget.totalAmount);
+  int get _effectiveTotal => (widget.totalAmount - _totalDiscount - max(_studentDiscount, _checkoutDiscount)).clamp(0, widget.totalAmount).toInt();
 
   @override
   void initState() {
@@ -3837,6 +3842,27 @@ class _PaymentSheetState extends State<_PaymentSheet> {
     _phoneController = TextEditingController(text: widget.userPhone);
     _matriculeController = TextEditingController()
       ..addListener(() => setState(() {}));
+    WidgetsBinding.instance.addPostFrameCallback((_) => _triggerCheckoutScratch());
+  }
+
+  Future<void> _triggerCheckoutScratch() async {
+    await Future.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+    try {
+      final ScratchCampaign? campaign =
+          await ScratchService.instance.fetchCampaignByTrigger('booking_checkout');
+      debugPrint('[CheckoutScratch] campaign=${campaign?.id} pool=${campaign?.rewardsPool.length}');
+      if (!mounted || campaign == null || campaign.rewardsPool.isEmpty) return;
+      debugPrint('[CheckoutScratch] affichage du sheet');
+      final RewardConfig? reward =
+          await showCheckoutScratchSheet(context, campaign: campaign);
+      if (!mounted) return;
+      if (reward != null && !reward.isNothing && reward.value != null) {
+        setState(() => _checkoutDiscount = reward.value!.round().clamp(0, widget.totalAmount));
+      }
+    } catch (e) {
+      debugPrint('[CheckoutScratch] erreur : $e');
+    }
   }
 
   @override
@@ -3880,7 +3906,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
   }
 
   Widget _buildPriceBreakdown() {
-    final bool hasDiscount = _totalDiscount > 0 || _studentDiscount > 0;
+    final bool hasDiscount = _totalDiscount > 0 || _studentDiscount > 0 || _checkoutDiscount > 0;
     final String cur = widget.currency.isEmpty ? 'XOF' : widget.currency;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -3934,23 +3960,61 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                 ],
               ),
             ],
-            if (_studentDiscount > 0) ...[
+            if (_studentDiscount > 0 && _checkoutDiscount > 0) ...[
+              // Les deux existent → on affiche uniquement la meilleure
               const SizedBox(height: 6),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.school_rounded, size: 15, color: Color(0xFF00897B)),
+                      const Icon(Icons.auto_awesome_rounded, size: 15, color: Color(0xFF00897B)),
                       const SizedBox(width: 4),
-                      const Text('Réduction étudiante',
+                      const Text('Meilleure réduction',
                           style: TextStyle(fontSize: 13, color: Color(0xFF00897B), fontWeight: FontWeight.w600)),
                     ],
                   ),
-                  Text('-$_studentDiscount $cur',
+                  Text('-${max(_studentDiscount, _checkoutDiscount)} $cur',
                       style: const TextStyle(fontSize: 13, color: Color(0xFF00897B), fontWeight: FontWeight.w700)),
                 ],
               ),
+            ] else ...[
+              if (_studentDiscount > 0) ...[
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.school_rounded, size: 15, color: Color(0xFF00897B)),
+                        const SizedBox(width: 4),
+                        const Text('Réduction étudiante',
+                            style: TextStyle(fontSize: 13, color: Color(0xFF00897B), fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                    Text('-$_studentDiscount $cur',
+                        style: const TextStyle(fontSize: 13, color: Color(0xFF00897B), fontWeight: FontWeight.w700)),
+                  ],
+                ),
+              ],
+              if (_checkoutDiscount > 0) ...[
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.confirmation_number_rounded, size: 15, color: Color(0xFF14B8A6)),
+                        const SizedBox(width: 4),
+                        const Text('Carte à gratter',
+                            style: TextStyle(fontSize: 13, color: Color(0xFF14B8A6), fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                    Text('-$_checkoutDiscount $cur',
+                        style: const TextStyle(fontSize: 13, color: Color(0xFF14B8A6), fontWeight: FontWeight.w700)),
+                  ],
+                ),
+              ],
             ],
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
@@ -4129,7 +4193,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
                     ),
-                    onPressed: () => Navigator.of(context).pop(_PaymentResult(studentDiscount: _studentDiscount)),
+                    onPressed: () => Navigator.of(context).pop(_PaymentResult(studentDiscount: _studentDiscount, checkoutDiscount: _checkoutDiscount)),
                     icon: const Icon(Icons.check_circle_rounded),
                     label: const Text('Réserver gratuitement'),
                   ),
@@ -4188,7 +4252,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                       ),
                       onPressed: _phoneController.text.trim().isEmpty
                           ? null
-                          : () => Navigator.of(context).pop(_PaymentResult(studentDiscount: _studentDiscount)),
+                          : () => Navigator.of(context).pop(_PaymentResult(studentDiscount: _studentDiscount, checkoutDiscount: _checkoutDiscount)),
                       icon: const Icon(Icons.check_circle_rounded),
                       label: const Text('Payer et Réserver'),
                     ),
