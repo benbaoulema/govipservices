@@ -26,8 +26,7 @@ import 'package:govipservices/features/scratch/data/scratch_service.dart';
 import 'package:govipservices/features/scratch/domain/models/scratch_models.dart';
 import 'package:govipservices/features/scratch/presentation/pages/student_scratch_sheet.dart';
 import 'package:govipservices/features/scratch/presentation/pages/checkout_scratch_sheet.dart';
-import 'package:govipservices/features/agent/data/agent_service.dart';
-import 'package:flutter/services.dart';
+import 'package:govipservices/features/agent/presentation/pages/otp_scanner_page.dart';
 
 const Color _travelAccent = Color(0xFF14B8A6);
 const Color _travelAccentDark = Color(0xFF0F766E);
@@ -3829,14 +3828,11 @@ class _PaymentSheetState extends State<_PaymentSheet> {
   _PaymentMethod? _method;
   late final TextEditingController _phoneController;
   late final TextEditingController _matriculeController;
-  late final TextEditingController _otpController;
 
   bool _isStudent = false;
   bool _loadingStudentCampaign = false;
   int _studentDiscount = 0;
   int _checkoutDiscount = 0;
-  bool _verifyingOtp = false;
-  String? _otpError;
 
   int get _totalDiscount => widget.eligibleRewards.fold(0, (acc, r) => acc + r.effectiveValue.round());
   int get _effectiveTotal => (widget.totalAmount - _totalDiscount - max(_studentDiscount, _checkoutDiscount)).clamp(0, widget.totalAmount).toInt();
@@ -3846,8 +3842,6 @@ class _PaymentSheetState extends State<_PaymentSheet> {
     super.initState();
     _phoneController = TextEditingController(text: widget.userPhone);
     _matriculeController = TextEditingController()
-      ..addListener(() => setState(() {}));
-    _otpController = TextEditingController()
       ..addListener(() => setState(() {}));
     WidgetsBinding.instance.addPostFrameCallback((_) => _triggerCheckoutScratch());
   }
@@ -3876,29 +3870,17 @@ class _PaymentSheetState extends State<_PaymentSheet> {
   void dispose() {
     _phoneController.dispose();
     _matriculeController.dispose();
-    _otpController.dispose();
     super.dispose();
   }
 
-  Future<void> _confirmCash() async {
-    final String otp = _otpController.text.trim();
-    if (otp.length != 6) {
-      setState(() => _otpError = 'Le code fait 6 chiffres.');
-      return;
-    }
-    setState(() {
-      _verifyingOtp = true;
-      _otpError = null;
-    });
-    final String? agentId = await AgentService.instance.verifyAndConsumeOtp(otp);
-    if (!mounted) return;
-    if (agentId == null) {
-      setState(() {
-        _verifyingOtp = false;
-        _otpError = 'Code invalide ou expiré. Demandez un nouveau code à l\'agent.';
-      });
-      return;
-    }
+  Future<void> _openCashScanner() async {
+    final OtpScanResult? result = await Navigator.of(context).push<OtpScanResult>(
+      MaterialPageRoute<OtpScanResult>(
+        builder: (_) => const OtpScannerPage(),
+        fullscreenDialog: true,
+      ),
+    );
+    if (!mounted || result == null || !result.valid) return;
     Navigator.of(context).pop(_PaymentResult(
       studentDiscount: _studentDiscount,
       checkoutDiscount: _checkoutDiscount,
@@ -4260,10 +4242,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                   color: const Color(0xFF059669),
                   icon: Icons.point_of_sale_rounded,
                   selected: _method == _PaymentMethod.cash,
-                  onTap: () => setState(() {
-                    _method = _PaymentMethod.cash;
-                    _otpError = null;
-                  }),
+                  onTap: () => setState(() => _method = _PaymentMethod.cash),
                 ),
 
                 // Champ selon méthode
@@ -4307,44 +4286,10 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                 if (_method == _PaymentMethod.cash) ...[
                   const SizedBox(height: 20),
                   const Text(
-                    'Code OTP agent (6 chiffres)',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF4A5568)),
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Demandez à l\'agent de générer un code depuis son app et saisissez-le ici.',
+                    'Demandez à l\'agent de générer un code, puis scannez-le ou saisissez-le.',
                     style: TextStyle(fontSize: 12, color: Color(0xFF6B7A90)),
                   ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: _otpController,
-                    keyboardType: TextInputType.number,
-                    maxLength: 6,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 8,
-                      color: Color(0xFF10233E),
-                    ),
-                    decoration: InputDecoration(
-                      hintText: '------',
-                      hintStyle: const TextStyle(fontSize: 28, letterSpacing: 8, color: Color(0xFFCBD5E1)),
-                      counterText: '',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Color(0xFF059669), width: 2),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-                    ),
-                  ),
-                  if (_otpError != null) ...[
-                    const SizedBox(height: 8),
-                    Text(_otpError!, style: const TextStyle(color: Colors.red, fontSize: 13)),
-                  ],
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
@@ -4355,16 +4300,9 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
                       ),
-                      onPressed: (_otpController.text.trim().length == 6 && !_verifyingOtp)
-                          ? _confirmCash
-                          : null,
-                      icon: _verifyingOtp
-                          ? const SizedBox(
-                              width: 18, height: 18,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                            )
-                          : const Icon(Icons.check_circle_rounded),
-                      label: const Text('Confirmer et Réserver'),
+                      onPressed: _openCashScanner,
+                      icon: const Icon(Icons.qr_code_scanner_rounded),
+                      label: const Text('Scanner le code agent'),
                     ),
                   ),
                 ],
