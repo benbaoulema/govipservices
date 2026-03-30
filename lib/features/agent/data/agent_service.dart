@@ -80,22 +80,31 @@ class AgentService {
   Future<String?> verifyAndConsumeOtp(String code) async {
     if (code.length != 6) return null;
     try {
+      // Filtre uniquement sur le code pour éviter un index composite
       final QuerySnapshot<Map<String, dynamic>> snap = await _otps
           .where('code', isEqualTo: code)
-          .where('used', isEqualTo: false)
-          .where('expiresAt', isGreaterThan: Timestamp.fromDate(DateTime.now()))
-          .limit(1)
+          .limit(5)
           .get();
 
       if (snap.docs.isEmpty) return null;
 
-      final DocumentSnapshot<Map<String, dynamic>> doc = snap.docs.first;
+      // Vérification used + expiry en mémoire
+      DocumentSnapshot<Map<String, dynamic>>? doc;
+      for (final d in snap.docs) {
+        final AgentOtp candidate = AgentOtp.fromFirestore(d);
+        if (candidate.isValid) {
+          doc = d;
+          break;
+        }
+      }
+      if (doc == null) return null;
+
       final AgentOtp otp = AgentOtp.fromFirestore(doc);
 
       // Marquer comme utilisé de façon atomique
       await _db.runTransaction((tx) async {
         final DocumentSnapshot<Map<String, dynamic>> fresh =
-            await tx.get(doc.reference);
+            await tx.get(doc!.reference);
         if (fresh.data()?['used'] == true) {
           throw Exception('OTP déjà utilisé.');
         }
