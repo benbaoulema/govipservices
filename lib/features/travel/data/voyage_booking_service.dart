@@ -148,6 +148,8 @@ class VoyageBookingService {
           'studentDiscount': input.studentDiscount,
         if (input.checkoutDiscount > 0)
           'checkoutDiscount': input.checkoutDiscount,
+        if (input.paymentDiscount > 0)
+          'paymentDiscount': input.paymentDiscount,
         'unreadForDriver': 0,
         'unreadForPassenger': 0,
         'status': 'pending',

@@ -19,6 +19,7 @@ import 'package:govipservices/features/scratch/data/scratch_service.dart';
 import 'package:govipservices/features/scratch/domain/models/scratch_models.dart';
 import 'package:govipservices/features/scratch/presentation/pages/scratch_launch_sheet.dart';
 import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
+import 'package:govipservices/features/app_version/presentation/app_update_dialog.dart';
 
 const double _topPanelMaxExtent = 424;
 

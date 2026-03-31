@@ -10,6 +10,7 @@ import 'package:govipservices/features/scratch/domain/models/scratch_models.dart
 Future<RewardConfig?> showCheckoutScratchSheet(
   BuildContext context, {
   required ScratchCampaign campaign,
+  bool waveBadge = false,
 }) {
   final RewardConfig? reward = _drawReward(campaign.rewardsPool);
   return showModalBottomSheet<RewardConfig?>(
@@ -19,7 +20,7 @@ Future<RewardConfig?> showCheckoutScratchSheet(
     isDismissible: false,
     enableDrag: false,
     backgroundColor: Colors.transparent,
-    builder: (_) => _CheckoutScratchSheet(reward: reward),
+    builder: (_) => _CheckoutScratchSheet(reward: reward, waveBadge: waveBadge),
   );
 }
 
@@ -47,8 +48,9 @@ const Color _kNavyMid = Color(0xFF152536);
 // ── Sheet ─────────────────────────────────────────────────────────────────────
 
 class _CheckoutScratchSheet extends StatefulWidget {
-  const _CheckoutScratchSheet({required this.reward});
+  const _CheckoutScratchSheet({required this.reward, this.waveBadge = false});
   final RewardConfig? reward;
+  final bool waveBadge;
 
   @override
   State<_CheckoutScratchSheet> createState() => _CheckoutScratchSheetState();
@@ -150,6 +152,46 @@ class _CheckoutScratchSheetState extends State<_CheckoutScratchSheet>
   Widget _buildHeader() {
     return Column(
       children: [
+        // Badge Wave (si paiement Wave)
+        if (widget.waveBadge) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A56DB).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFF1A56DB).withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Image.asset(
+                    'assets/wave.jpg',
+                    width: 20,
+                    height: 20,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const Icon(
+                      Icons.waves_rounded,
+                      color: Color(0xFF1A56DB),
+                      size: 16,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 7),
+                const Text(
+                  'Bonus paiement Wave',
+                  style: TextStyle(
+                    color: Color(0xFF93C5FD),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         Container(
           width: 60,
           height: 60,
@@ -161,10 +203,10 @@ class _CheckoutScratchSheetState extends State<_CheckoutScratchSheet>
           child: const Icon(Icons.stars_rounded, color: _kGold, size: 30),
         ),
         const SizedBox(height: 16),
-        const Text(
-          'Ta surprise t\'attend !',
+        Text(
+          widget.waveBadge ? 'Récompense Wave !' : 'Ta surprise t\'attend !',
           textAlign: TextAlign.center,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: 22,
             fontWeight: FontWeight.w900,
             color: Colors.white,
@@ -173,7 +215,9 @@ class _CheckoutScratchSheetState extends State<_CheckoutScratchSheet>
         ),
         const SizedBox(height: 6),
         Text(
-          'Gratte et découvre ta récompense exclusive',
+          widget.waveBadge
+              ? 'Gratte et découvre ta réduction sur cette réservation'
+              : 'Gratte et découvre ta récompense exclusive',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.45)),
         ),

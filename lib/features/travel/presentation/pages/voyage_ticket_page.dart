@@ -434,23 +434,58 @@ class VoyageTicketPage extends StatelessWidget {
                   padding: const pw.EdgeInsets.all(14),
                   decoration: pw.BoxDecoration(
                     color: PdfColor.fromHex('E6FAF7'),
-                    borderRadius:
-                        const pw.BorderRadius.all(pw.Radius.circular(10)),
+                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(10)),
                   ),
-                  child: pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Text('Total réglé',
-                          style: pw.TextStyle(
-                              fontWeight: pw.FontWeight.bold,
-                              color: PdfColor.fromHex('007A63'))),
-                      pw.Text(
-                        '${booking.totalPrice} ${booking.tripCurrency}',
-                        style: pw.TextStyle(
-                            fontSize: 16,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColor.fromHex('007A63')),
-                      ),
+                      if (booking.discountAmount > 0 || booking.studentDiscount > 0 ||
+                          booking.checkoutDiscount > 0 || booking.paymentDiscount > 0) ...[
+                        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                          pw.Text('Prix de base', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
+                          pw.Text(
+                            '${booking.segmentPrice * booking.requestedSeats} ${booking.tripCurrency}',
+                            style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+                          ),
+                        ]),
+                        if (booking.discountAmount > 0) ...[
+                          pw.SizedBox(height: 4),
+                          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                            pw.Text('Récompenses portefeuille', style: pw.TextStyle(fontSize: 10, color: PdfColor.fromHex('059669'))),
+                            pw.Text('-${booking.discountAmount} ${booking.tripCurrency}', style: pw.TextStyle(fontSize: 10, color: PdfColor.fromHex('059669'))),
+                          ]),
+                        ],
+                        if (booking.studentDiscount > 0) ...[
+                          pw.SizedBox(height: 4),
+                          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                            pw.Text('Réduction étudiant', style: pw.TextStyle(fontSize: 10, color: PdfColor.fromHex('7C3AED'))),
+                            pw.Text('-${booking.studentDiscount} ${booking.tripCurrency}', style: pw.TextStyle(fontSize: 10, color: PdfColor.fromHex('7C3AED'))),
+                          ]),
+                        ],
+                        if (booking.checkoutDiscount > 0) ...[
+                          pw.SizedBox(height: 4),
+                          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                            pw.Text('Carte à gratter', style: pw.TextStyle(fontSize: 10, color: PdfColor.fromHex('CBA135'))),
+                            pw.Text('-${booking.checkoutDiscount} ${booking.tripCurrency}', style: pw.TextStyle(fontSize: 10, color: PdfColor.fromHex('CBA135'))),
+                          ]),
+                        ],
+                        if (booking.paymentDiscount > 0) ...[
+                          pw.SizedBox(height: 4),
+                          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                            pw.Text('Bonus Wave', style: pw.TextStyle(fontSize: 10, color: PdfColor.fromHex('1A56DB'))),
+                            pw.Text('-${booking.paymentDiscount} ${booking.tripCurrency}', style: pw.TextStyle(fontSize: 10, color: PdfColor.fromHex('1A56DB'))),
+                          ]),
+                        ],
+                        pw.Divider(color: PdfColor.fromHex('CCECE6'), thickness: 0.5),
+                        pw.SizedBox(height: 2),
+                      ],
+                      pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                        pw.Text('Total réglé', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('007A63'))),
+                        pw.Text(
+                          '${booking.totalPrice} ${booking.tripCurrency}',
+                          style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('007A63')),
+                        ),
+                      ]),
                     ],
                   ),
                 ),
@@ -797,24 +832,7 @@ class _TicketCard extends StatelessWidget {
                 ],
                 if (booking.totalPrice > 0) ...[
                   const SizedBox(height: 16),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: _travelAccentSoft,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Total', style: TextStyle(fontWeight: FontWeight.w700, color: _travelAccentDark)),
-                        Text(
-                          '${booking.totalPrice} ${booking.tripCurrency}',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: _travelAccentDark),
-                        ),
-                      ],
-                    ),
-                  ),
+                  _buildPriceBreakdown(booking),
                 ],
               ],
             ),
@@ -861,6 +879,87 @@ class _TicketCard extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPriceBreakdown(VoyageBookingDocument booking) {
+    final String cur = booking.tripCurrency.isEmpty ? 'XOF' : booking.tripCurrency;
+    final bool hasReductions = booking.discountAmount > 0 ||
+        booking.studentDiscount > 0 ||
+        booking.checkoutDiscount > 0 ||
+        booking.paymentDiscount > 0;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _travelAccentSoft,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          if (hasReductions) ...[
+            // Prix de base barré
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Prix de base', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                Text(
+                  '${booking.segmentPrice * booking.requestedSeats} $cur',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[500],
+                    decoration: TextDecoration.lineThrough,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            if (booking.discountAmount > 0)
+              _discountRow('Récompenses portefeuille', booking.discountAmount, cur, const Color(0xFF059669)),
+            if (booking.studentDiscount > 0)
+              _discountRow('Réduction étudiant', booking.studentDiscount, cur, const Color(0xFF7C3AED)),
+            if (booking.checkoutDiscount > 0)
+              _discountRow('Carte à gratter', booking.checkoutDiscount, cur, const Color(0xFFCBA135)),
+            if (booking.paymentDiscount > 0)
+              _discountRow('Bonus Wave', booking.paymentDiscount, cur, const Color(0xFF1A56DB)),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Divider(height: 1, color: Color(0xFFCCE9E5)),
+            ),
+          ],
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                hasReductions ? 'Total réglé' : 'Total',
+                style: const TextStyle(fontWeight: FontWeight.w700, color: _travelAccentDark),
+              ),
+              Text(
+                '${booking.totalPrice} $cur',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: _travelAccentDark),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _discountRow(String label, int amount, String cur, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(children: [
+            Icon(Icons.remove_circle_outline_rounded, size: 13, color: color),
+            const SizedBox(width: 5),
+            Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600)),
+          ]),
+          Text('-$amount $cur', style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w700)),
         ],
       ),
     );

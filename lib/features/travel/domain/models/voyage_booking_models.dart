@@ -41,6 +41,7 @@ class CreateVoyageBookingInput {
     this.appliedRewardIds = const <String>[],
     this.studentDiscount = 0,
     this.checkoutDiscount = 0,
+    this.paymentDiscount = 0,
   });
 
   final String tripId;
@@ -59,6 +60,8 @@ class CreateVoyageBookingInput {
   final int studentDiscount;
   /// Remise carte à gratter checkout (non persistée en user_rewards).
   final int checkoutDiscount;
+  /// Remise carte à gratter Wave paiement (non persistée en user_rewards).
+  final int paymentDiscount;
   final String segmentFrom;
   final String segmentTo;
   final int segmentPrice;
@@ -99,6 +102,10 @@ class VoyageBookingDocument {
     required this.unreadForPassenger,
     required this.status,
     this.comfortOptions = const <String>[],
+    this.discountAmount = 0,
+    this.studentDiscount = 0,
+    this.checkoutDiscount = 0,
+    this.paymentDiscount = 0,
     this.createdAt,
     this.updatedAt,
   });
@@ -135,6 +142,14 @@ class VoyageBookingDocument {
   final int unreadForPassenger;
   final String status;
   final List<String> comfortOptions;
+  /// Réduction via récompenses portefeuille.
+  final int discountAmount;
+  /// Réduction étudiante (carte à gratter).
+  final int studentDiscount;
+  /// Réduction carte checkout.
+  final int checkoutDiscount;
+  /// Réduction bonus Wave.
+  final int paymentDiscount;
   final Timestamp? createdAt;
   final Timestamp? updatedAt;
 
@@ -219,6 +234,10 @@ class VoyageBookingDocument {
       comfortOptions: (map['comfortOptions'] as List<dynamic>? ?? const <dynamic>[])
           .whereType<String>()
           .toList(growable: false),
+      discountAmount: (map['discountAmount'] as num? ?? 0).toInt(),
+      studentDiscount: (map['studentDiscount'] as num? ?? 0).toInt(),
+      checkoutDiscount: (map['checkoutDiscount'] as num? ?? 0).toInt(),
+      paymentDiscount: (map['paymentDiscount'] as num? ?? 0).toInt(),
       createdAt: map['createdAt'] as Timestamp?,
       updatedAt: map['updatedAt'] as Timestamp?,
     );

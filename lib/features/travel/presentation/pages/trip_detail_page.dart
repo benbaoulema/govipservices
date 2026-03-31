@@ -1364,6 +1364,7 @@ class _BookingConfirmationDialogState extends State<_BookingConfirmationDialog> 
           appliedRewardIds: eligibleRewards.map((r) => r.id).toList(growable: false),
           studentDiscount: paymentResult.studentDiscount,
           checkoutDiscount: paymentResult.checkoutDiscount,
+          paymentDiscount: paymentResult.paymentDiscount,
           segmentFrom: widget.segment.departureNode.address,
           segmentTo: widget.segment.arrivalNode.address,
           segmentPrice: widget.segment.segmentPrice,
@@ -3800,9 +3801,14 @@ class _HomeAddressSheetState extends State<_HomeAddressSheet> {
 // ── Payment Sheet ───────────────────────────────────────────────────────────
 
 class _PaymentResult {
-  const _PaymentResult({this.studentDiscount = 0, this.checkoutDiscount = 0});
+  const _PaymentResult({
+    this.studentDiscount = 0,
+    this.checkoutDiscount = 0,
+    this.paymentDiscount = 0,
+  });
   final int studentDiscount;
   final int checkoutDiscount;
+  final int paymentDiscount;
 }
 
 enum _PaymentMethod { wave, orangeMoney, cash }
@@ -3833,9 +3839,11 @@ class _PaymentSheetState extends State<_PaymentSheet> {
   bool _loadingStudentCampaign = false;
   int _studentDiscount = 0;
   int _checkoutDiscount = 0;
+  int _paymentDiscount = 0;
+  bool _paymentScratchTriggered = false;
 
   int get _totalDiscount => widget.eligibleRewards.fold(0, (acc, r) => acc + r.effectiveValue.round());
-  int get _effectiveTotal => (widget.totalAmount - _totalDiscount - max(_studentDiscount, _checkoutDiscount)).clamp(0, widget.totalAmount).toInt();
+  int get _effectiveTotal => (widget.totalAmount - _totalDiscount - max(_studentDiscount, _checkoutDiscount) - _paymentDiscount).clamp(0, widget.totalAmount).toInt();
 
   @override
   void initState() {
@@ -3844,6 +3852,24 @@ class _PaymentSheetState extends State<_PaymentSheet> {
     _matriculeController = TextEditingController()
       ..addListener(() => setState(() {}));
     WidgetsBinding.instance.addPostFrameCallback((_) => _triggerCheckoutScratch());
+  }
+
+  Future<void> _triggerPaymentScratch() async {
+    if (_paymentScratchTriggered) return;
+    _paymentScratchTriggered = true;
+    try {
+      final ScratchCampaign? campaign =
+          await ScratchService.instance.fetchCampaignByTrigger('payment_completed');
+      if (!mounted || campaign == null || campaign.rewardsPool.isEmpty) return;
+      final RewardConfig? reward =
+          await showCheckoutScratchSheet(context, campaign: campaign, waveBadge: true);
+      if (!mounted) return;
+      if (reward != null && !reward.isNothing && reward.value != null) {
+        setState(() => _paymentDiscount = reward.value!.round().clamp(0, widget.totalAmount));
+      }
+    } catch (e) {
+      debugPrint('[PaymentScratch] erreur : $e');
+    }
   }
 
   Future<void> _triggerCheckoutScratch() async {
@@ -3921,7 +3947,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
   }
 
   Widget _buildPriceBreakdown() {
-    final bool hasDiscount = _totalDiscount > 0 || _studentDiscount > 0 || _checkoutDiscount > 0;
+    final bool hasDiscount = _totalDiscount > 0 || _studentDiscount > 0 || _checkoutDiscount > 0 || _paymentDiscount > 0;
     final String cur = widget.currency.isEmpty ? 'XOF' : widget.currency;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -4030,6 +4056,21 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                   ],
                 ),
               ],
+            ],
+            if (_paymentDiscount > 0) ...[
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(children: [
+                    Image.asset('assets/wave.jpg', width: 16, height: 16,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.waves_rounded, size: 14, color: Color(0xFF1A56DB))),
+                    const SizedBox(width: 6),
+                    const Text('Bonus Wave', style: TextStyle(fontSize: 13, color: Color(0xFF1A56DB), fontWeight: FontWeight.w600)),
+                  ]),
+                  Text('-$_paymentDiscount $cur', style: const TextStyle(fontSize: 13, color: Color(0xFF1A56DB), fontWeight: FontWeight.w700)),
+                ],
+              ),
             ],
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
@@ -4208,7 +4249,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
                     ),
-                    onPressed: () => Navigator.of(context).pop(_PaymentResult(studentDiscount: _studentDiscount, checkoutDiscount: _checkoutDiscount)),
+                    onPressed: () => Navigator.of(context).pop(_PaymentResult(studentDiscount: _studentDiscount, checkoutDiscount: _checkoutDiscount, paymentDiscount: _paymentDiscount)),
                     icon: const Icon(Icons.check_circle_rounded),
                     label: const Text('Réserver gratuitement'),
                   ),
@@ -4223,7 +4264,10 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                   color: const Color(0xFF1A56DB),
                   imagePath: 'assets/wave.jpg',
                   selected: _method == _PaymentMethod.wave,
-                  onTap: () => setState(() => _method = _PaymentMethod.wave),
+                  onTap: () {
+                    setState(() => _method = _PaymentMethod.wave);
+                    _triggerPaymentScratch();
+                  },
                 ),
                 const SizedBox(height: 8),
                 _PaymentMethodTile(
@@ -4276,7 +4320,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                       ),
                       onPressed: _phoneController.text.trim().isEmpty
                           ? null
-                          : () => Navigator.of(context).pop(_PaymentResult(studentDiscount: _studentDiscount, checkoutDiscount: _checkoutDiscount)),
+                          : () => Navigator.of(context).pop(_PaymentResult(studentDiscount: _studentDiscount, checkoutDiscount: _checkoutDiscount, paymentDiscount: _paymentDiscount)),
                       icon: const Icon(Icons.check_circle_rounded),
                       label: const Text('Payer et Réserver'),
                     ),
