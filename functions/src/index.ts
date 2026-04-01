@@ -223,3 +223,4 @@ export { onPaymentCompleted } from "./handlers/on-payment-completed";
 export { onDriverWalletTopup } from "./handlers/on-driver-wallet-topup";
 export { revealScratchCard } from "./handlers/reveal-scratch-card";
 export { redeemReward } from "./handlers/redeem-reward";
+export { notifyTripPassengers } from "./handlers/notify-trip-passengers";

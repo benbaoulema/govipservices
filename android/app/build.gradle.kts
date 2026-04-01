@@ -54,8 +54,8 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 23
         targetSdk = flutter.targetSdkVersion
-        versionCode = 2603241
-        versionName = "1.0.2603241"
+        versionCode = 2604011
+        versionName = "1.0.2604041"
     }
 
     flavorDimensions += "env"

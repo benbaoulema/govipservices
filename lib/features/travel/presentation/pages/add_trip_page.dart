@@ -13,7 +13,9 @@ import 'package:govipservices/app/config/runtime_app_config.dart';
 import 'package:govipservices/app/router/app_routes.dart';
 import 'package:govipservices/features/travel/data/google_places_service.dart';
 import 'package:govipservices/features/travel/data/route_stop_suggestion_service.dart';
+import 'package:govipservices/features/travel/data/transport_company_repository.dart';
 import 'package:govipservices/features/travel/data/travel_repository.dart';
+import 'package:govipservices/features/travel/domain/models/transport_company.dart';
 import 'package:govipservices/features/travel/presentation/widgets/address_autocomplete_field.dart';
 import 'package:govipservices/features/user/data/user_firestore_repository.dart';
 import 'package:govipservices/shared/widgets/home_app_bar_button.dart';
@@ -129,6 +131,7 @@ class _AddTripPageState extends State<AddTripPage> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TravelRepository _travelRepository = TravelRepository();
   final UserFirestoreRepository _userFirestoreRepository = UserFirestoreRepository();
+  final TransportCompanyRepository _companyRepository = TransportCompanyRepository();
   final ImagePicker _imagePicker = ImagePicker();
   GoogleMapController? _mapController;
 
@@ -182,6 +185,9 @@ class _AddTripPageState extends State<AddTripPage> {
   int _stepIndex = 0;
   bool _isForwardTransition = true;
   bool _isBus = false;
+  TransportCompany? _selectedCompany;
+  List<TransportCompany> _companies = [];
+  bool _isLoadingCompanies = false;
   bool _hasLuggageSpace = true;
   bool _allowsPets = false;
   String _currency = 'XOF';
@@ -704,6 +710,7 @@ class _AddTripPageState extends State<AddTripPage> {
       case _TripStep.vehicleInfo:
         return _vehicleController.text.trim().length >= 2;
       case _TripStep.proCarrier:
+        return !_isBus || _selectedCompany != null;
       case _TripStep.frequency:
         return true;
       case _TripStep.comfort:
@@ -1332,6 +1339,8 @@ class _AddTripPageState extends State<AddTripPage> {
       'pricePerSeat': _priceAmount,
       'vehicleModel': _vehicleController.text.trim(),
       'isBus': _isBus,
+      'companyId': _selectedCompany?.id,
+      'companyName': _selectedCompany?.name,
       'isFrequentTrip': _tripFrequency != 'none',
       'tripFrequency': _tripFrequency,
       'driverName': _driverController.text.trim(),
@@ -1484,6 +1493,18 @@ class _AddTripPageState extends State<AddTripPage> {
     setState(() {
       _intermediateStops[idx] = current.copyWith(priceFromDeparture: next);
     });
+  }
+
+  Future<void> _loadCompanies() async {
+    setState(() => _isLoadingCompanies = true);
+    try {
+      final list = await _companyRepository.fetchEnabled();
+      setState(() => _companies = list);
+    } catch (_) {
+      // silently ignore, list stays empty
+    } finally {
+      setState(() => _isLoadingCompanies = false);
+    }
   }
 
   Future<void> _publishTrip() async {
@@ -2388,18 +2409,52 @@ class _AddTripPageState extends State<AddTripPage> {
           title: 'Transporteur pro',
           subtitle: 'Optionnel: cochez si vous etes professionnel.',
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CheckboxListTile(
                 value: _isBus,
                 onChanged: (value) {
+                  final bool checked = value ?? false;
                   setState(() {
-                    _isBus = value ?? false;
+                    _isBus = checked;
+                    if (!checked) _selectedCompany = null;
                   });
+                  if (checked && _companies.isEmpty) _loadCompanies();
                 },
                 title: const Text('Transporteur pro'),
                 subtitle: const Text('Vous pouvez continuer sans cocher.'),
                 contentPadding: EdgeInsets.zero,
               ),
+              if (_isBus) ...[
+                const SizedBox(height: 12),
+                if (_isLoadingCompanies)
+                  const Center(child: CircularProgressIndicator())
+                else if (_companies.isEmpty)
+                  const Text(
+                    'Aucune compagnie disponible.',
+                    style: TextStyle(color: Colors.red),
+                  )
+                else
+                  DropdownButtonFormField<TransportCompany>(
+                    value: _selectedCompany,
+                    decoration: const InputDecoration(
+                      labelText: 'Compagnie *',
+                      border: OutlineInputBorder(),
+                    ),
+                    hint: const Text('Sélectionner une compagnie'),
+                    items: _companies
+                        .map(
+                          (c) => DropdownMenuItem(
+                            value: c,
+                            child: Text(c.name),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (c) => setState(() => _selectedCompany = c),
+                    validator: (_) =>
+                        _isBus && _selectedCompany == null ? 'Requis' : null,
+                  ),
+              ],
             ],
           ),
         );
