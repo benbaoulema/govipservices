@@ -1158,22 +1158,33 @@ class _TripResultTile extends StatelessWidget {
                               ),
                             ),
                           ),
-                          if (trip.seats != null)
-                            Container(
+                          Builder(builder: (context) {
+                            final Object? rawAvail = trip.raw['segmentAvailableSeats'];
+                            final bool hasSegmentDispo = rawAvail != null;
+                            final int dispo = hasSegmentDispo
+                                ? (rawAvail as num).toInt()
+                                : (trip.seats ?? 0);
+                            final bool isFull = dispo <= 0;
+                            return Container(
                               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                               decoration: BoxDecoration(
-                                color: _travelAccentSoft,
+                                color: isFull
+                                    ? const Color(0xFFFFEDED)
+                                    : _travelAccentSoft,
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
-                                '${trip.seats} pl.',
-                                style: const TextStyle(
+                                isFull ? 'Complet' : '$dispo pl.',
+                                style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w800,
-                                  color: _travelAccentDark,
+                                  color: isFull
+                                      ? const Color(0xFFB91C1C)
+                                      : _travelAccentDark,
                                 ),
                               ),
-                            ),
+                            );
+                          }),
                         ],
                       ),
                     ],

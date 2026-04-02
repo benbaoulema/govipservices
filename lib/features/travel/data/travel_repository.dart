@@ -164,6 +164,15 @@ class TravelRepository implements TravelService {
         raw['arrivalEstimatedTime'] = segmentArrivalTime;
       }
 
+      final int capacity = trip.seats ?? 0;
+      final int segmentAvailableSeats = _computeSegmentAvailableSeats(
+        raw: trip.raw,
+        fromAddress: fromNode.address.isEmpty ? trip.departurePlace : fromNode.address,
+        toAddress: toNode.address.isEmpty ? trip.arrivalPlace : toNode.address,
+        capacity: capacity,
+      );
+      raw['segmentAvailableSeats'] = segmentAvailableSeats;
+
       results.add(
         TripSearchResult(
           id: trip.id,
@@ -1011,6 +1020,39 @@ int findNodeIndexByQuery(List<_RouteNode> nodes, String queryAddress, {int after
     if (matchesAddressQuery(queryAddress, nodes[i].address)) return i;
   }
   return -1;
+}
+
+int _computeSegmentAvailableSeats({
+  required Map<String, dynamic> raw,
+  required String fromAddress,
+  required String toAddress,
+  required int capacity,
+}) {
+  final Object? occ = raw['segmentOccupancy'];
+  if (occ is! Map || occ.isEmpty) return capacity;
+  final Map<String, dynamic> occupancy = Map<String, dynamic>.from(occ);
+
+  // Reconstituer l'ordre des points depuis les clés (A__B, B__C, ...)
+  final List<String> keys = occupancy.keys.toList();
+  final List<String> points = <String>[];
+  for (final String key in keys) {
+    final List<String> parts = key.split('__');
+    if (parts.length != 2) continue;
+    if (points.isEmpty) points.add(parts[0]);
+    points.add(parts[1]);
+  }
+
+  final int fromIdx = points.indexWhere((p) => p.trim() == fromAddress.trim());
+  final int toIdx = points.indexWhere((p) => p.trim() == toAddress.trim());
+  if (fromIdx < 0 || toIdx < 0 || toIdx <= fromIdx) return capacity;
+
+  final List<String> coveredKeys = keys.sublist(fromIdx, toIdx);
+  int maxOccupied = 0;
+  for (final String key in coveredKeys) {
+    final int occupied = (occupancy[key] as num?)?.toInt() ?? 0;
+    if (occupied > maxOccupied) maxOccupied = occupied;
+  }
+  return (capacity - maxOccupied).clamp(0, capacity);
 }
 
 _TripCardSegmentView? buildTripCardSegmentView({
