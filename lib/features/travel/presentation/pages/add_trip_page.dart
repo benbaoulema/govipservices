@@ -1386,19 +1386,21 @@ class _AddTripPageState extends State<AddTripPage> {
         .toList(growable: false);
   }
 
-  Map<String, dynamic> _buildSegmentOccupancy() {
-    final List<String> points = [
+  List<String> _buildSegmentPoints() {
+    return [
       _departureController.text.trim(),
       ..._intermediateStops
           .where((s) => s.selected && s.toStop == null)
           .map((s) => s.address.trim()),
       _arrivalController.text.trim(),
     ].where((a) => a.isNotEmpty).toList();
+  }
 
+  Map<String, dynamic> _buildSegmentOccupancy() {
+    final List<String> points = _buildSegmentPoints();
     final Map<String, dynamic> occupancy = <String, dynamic>{};
     for (int i = 0; i < points.length - 1; i++) {
-      final String key = '${points[i]}__${points[i + 1]}';
-      occupancy[key] = 0;
+      occupancy['${points[i]}__${points[i + 1]}'] = 0;
     }
     return occupancy;
   }
@@ -1422,6 +1424,7 @@ class _AddTripPageState extends State<AddTripPage> {
       'pricePerSeat': _priceAmount,
       'vehicleModel': _vehicleController.text.trim(),
       'isBus': _isBus,
+      'segmentPoints': _buildSegmentPoints(),
       'segmentOccupancy': _buildSegmentOccupancy(),
       'companyId': _selectedCompany?.id,
       'companyName': _selectedCompany?.name,

@@ -65,6 +65,10 @@ class TripDetailRepositoryImpl implements TripDetailRepository {
       status: _str(raw['status']).isEmpty ? 'published' : _str(raw['status']),
       isBus: raw['isBus'] == true,
       segmentOccupancy: _parseSegmentOccupancy(raw['segmentOccupancy']),
+      segmentPoints: (raw['segmentPoints'] as List<dynamic>? ?? const <dynamic>[])
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toList(),
     );
   }
 

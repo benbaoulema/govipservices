@@ -1032,23 +1032,20 @@ int _computeSegmentAvailableSeats({
   if (occ is! Map || occ.isEmpty) return capacity;
   final Map<String, dynamic> occupancy = Map<String, dynamic>.from(occ);
 
-  // Reconstituer l'ordre des points depuis les clés (A__B, B__C, ...)
-  final List<String> keys = occupancy.keys.toList();
-  final List<String> points = <String>[];
-  for (final String key in keys) {
-    final List<String> parts = key.split('__');
-    if (parts.length != 2) continue;
-    if (points.isEmpty) points.add(parts[0]);
-    points.add(parts[1]);
-  }
+  // Utiliser segmentPoints (array ordonné) pour éviter les problèmes d'ordre Firestore
+  final List<String> points = (raw['segmentPoints'] as List<dynamic>? ?? const <dynamic>[])
+      .map((e) => e.toString().trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
+  if (points.length < 2) return capacity;
 
-  final int fromIdx = points.indexWhere((p) => p.trim() == fromAddress.trim());
-  final int toIdx = points.indexWhere((p) => p.trim() == toAddress.trim());
+  final int fromIdx = points.indexWhere((p) => p == fromAddress.trim());
+  final int toIdx = points.indexWhere((p) => p == toAddress.trim());
   if (fromIdx < 0 || toIdx < 0 || toIdx <= fromIdx) return capacity;
 
-  final List<String> coveredKeys = keys.sublist(fromIdx, toIdx);
   int maxOccupied = 0;
-  for (final String key in coveredKeys) {
+  for (int i = fromIdx; i < toIdx; i++) {
+    final String key = '${points[i]}__${points[i + 1]}';
     final int occupied = (occupancy[key] as num?)?.toInt() ?? 0;
     if (occupied > maxOccupied) maxOccupied = occupied;
   }

@@ -57,10 +57,15 @@ class VoyageBookingService {
       final int baseCapacity = _toInt(trip['seats'], 0);
       final Map<String, dynamic>? segmentOccupancy =
           trip['segmentOccupancy'] is Map ? Map<String, dynamic>.from(trip['segmentOccupancy'] as Map) : null;
-      final bool usesSegments = segmentOccupancy != null && segmentOccupancy.isNotEmpty;
+      final List<String> segmentPoints = (trip['segmentPoints'] as List<dynamic>? ?? const <dynamic>[])
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      final bool usesSegments = segmentOccupancy != null && segmentOccupancy.isNotEmpty && segmentPoints.length >= 2;
 
       if (usesSegments) {
         final List<String> coveredKeys = _coveredSegmentKeys(
+          segmentPoints: segmentPoints,
           segmentOccupancy: segmentOccupancy,
           from: input.segmentFrom,
           to: input.segmentTo,
@@ -178,6 +183,7 @@ class VoyageBookingService {
 
       if (usesSegments) {
         final List<String> coveredKeys = _coveredSegmentKeys(
+          segmentPoints: segmentPoints,
           segmentOccupancy: segmentOccupancy,
           from: input.segmentFrom,
           to: input.segmentTo,
@@ -537,12 +543,20 @@ class VoyageBookingService {
           tripSnap.data()!['segmentOccupancy'] is Map
               ? Map<String, dynamic>.from(tripSnap.data()!['segmentOccupancy'] as Map)
               : null;
-      final bool usesSegments = tripSegmentOccupancy != null && tripSegmentOccupancy.isNotEmpty;
+      final List<String> tripSegmentPoints =
+          (tripSnap.data()!['segmentPoints'] as List<dynamic>? ?? const <dynamic>[])
+              .map((e) => e.toString().trim())
+              .where((e) => e.isNotEmpty)
+              .toList();
+      final bool usesSegments = tripSegmentOccupancy != null &&
+          tripSegmentOccupancy.isNotEmpty &&
+          tripSegmentPoints.length >= 2;
 
       if (usesSegments) {
         final String segFrom = _toStringSafe(booking['segmentFrom']);
         final String segTo = _toStringSafe(booking['segmentTo']);
         final List<String> coveredKeys = _coveredSegmentKeys(
+          segmentPoints: tripSegmentPoints,
           segmentOccupancy: tripSegmentOccupancy,
           from: segFrom,
           to: segTo,
@@ -729,26 +743,23 @@ class VoyageBookingService {
   }
 
   /// Retourne les clés de tronçons couverts par un segment [from] → [to]
-  /// en se basant sur la map segmentOccupancy du trajet.
+  /// en utilisant segmentPoints (array ordonné) pour éviter les problèmes d'ordre Firestore.
   List<String> _coveredSegmentKeys({
+    required List<String> segmentPoints,
     required Map<String, dynamic> segmentOccupancy,
     required String from,
     required String to,
   }) {
-    final List<String> keys = segmentOccupancy.keys.toList();
-    // Reconstituer l'ordre des points depuis les clés (A__B, B__C, C__D)
-    if (keys.isEmpty) return const <String>[];
-    final List<String> points = <String>[];
-    for (final String key in keys) {
-      final List<String> parts = key.split('__');
-      if (parts.length != 2) continue;
-      if (points.isEmpty) points.add(parts[0]);
-      points.add(parts[1]);
-    }
-    final int fromIdx = points.indexWhere((p) => p.trim() == from.trim());
-    final int toIdx = points.indexWhere((p) => p.trim() == to.trim());
+    if (segmentPoints.length < 2) return const <String>[];
+    final int fromIdx = segmentPoints.indexWhere((p) => p == from.trim());
+    final int toIdx = segmentPoints.indexWhere((p) => p == to.trim());
     if (fromIdx < 0 || toIdx < 0 || toIdx <= fromIdx) return const <String>[];
-    return keys.sublist(fromIdx, toIdx);
+    final List<String> covered = <String>[];
+    for (int i = fromIdx; i < toIdx; i++) {
+      final String key = '${segmentPoints[i]}__${segmentPoints[i + 1]}';
+      if (segmentOccupancy.containsKey(key)) covered.add(key);
+    }
+    return covered;
   }
 
   /// Vérifie la dispo par tronçon et lève une exception si insuffisant.

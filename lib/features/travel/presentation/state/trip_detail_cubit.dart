@@ -127,6 +127,7 @@ class TripDetailCubit extends ChangeNotifier {
         effectiveDepartureDate: _selectedDisplayDate ?? '',
         fallbackSeats: trip.seats,
         segmentOccupancy: trip.segmentOccupancy,
+        segmentPoints: trip.segmentPoints,
       );
       final int clampedSeats = _state.selectedSeats.clamp(
         1,
@@ -352,25 +353,18 @@ class TripDetailCubit extends ChangeNotifier {
     required String effectiveDepartureDate,
     required int fallbackSeats,
     Map<String, int> segmentOccupancy = const <String, int>{},
+    List<String> segmentPoints = const <String>[],
   }) async {
-    // Yield management : calcul par tronçon si segmentOccupancy existe
-    if (segmentOccupancy.isNotEmpty) {
+    // Yield management : calcul par tronçon si segmentOccupancy + segmentPoints existent
+    if (segmentOccupancy.isNotEmpty && segmentPoints.length >= 2) {
       final String from = _args.from.trim();
       final String to = _args.to.trim();
-      final List<String> keys = segmentOccupancy.keys.toList();
-      final List<String> points = <String>[];
-      for (final String key in keys) {
-        final List<String> parts = key.split('__');
-        if (parts.length != 2) continue;
-        if (points.isEmpty) points.add(parts[0]);
-        points.add(parts[1]);
-      }
-      final int fromIdx = points.indexWhere((p) => p.trim() == from);
-      final int toIdx = points.indexWhere((p) => p.trim() == to);
+      final int fromIdx = segmentPoints.indexWhere((p) => p == from);
+      final int toIdx = segmentPoints.indexWhere((p) => p == to);
       if (fromIdx >= 0 && toIdx > fromIdx) {
-        final List<String> covered = keys.sublist(fromIdx, toIdx);
         int maxOccupied = 0;
-        for (final String key in covered) {
+        for (int i = fromIdx; i < toIdx; i++) {
+          final String key = '${segmentPoints[i]}__${segmentPoints[i + 1]}';
           final int occ = segmentOccupancy[key] ?? 0;
           if (occ > maxOccupied) maxOccupied = occ;
         }
