@@ -65,7 +65,7 @@ class VoyageBookingService {
           from: input.segmentFrom,
           to: input.segmentTo,
         );
-        if (coveredKeys.isEmpty) throw Exception('Segment invalide pour ce trajet.');
+        if (coveredKeys.isEmpty) throw Exception('Ce trajet ne dessert pas ce parcours.');
         _checkSegmentCapacity(
           segmentOccupancy: segmentOccupancy,
           coveredKeys: coveredKeys,
@@ -761,7 +761,7 @@ class VoyageBookingService {
     for (final String key in coveredKeys) {
       final int occupied = _toInt(segmentOccupancy[key], 0);
       if (occupied + requestedSeats > capacity) {
-        throw Exception('Places insuffisantes sur le tronçon "$key".');
+        throw Exception('Plus de places disponibles pour ce parcours.');
       }
     }
   }
@@ -861,7 +861,7 @@ String? validateCreateVoyageBookingInput(CreateVoyageBookingInput input) {
     return 'Contact du demandeur manquant.';
   }
   if (input.segmentFrom.trim().isEmpty || input.segmentTo.trim().isEmpty) {
-    return 'Segment de trajet invalide.';
+    return 'Veuillez préciser votre point de départ et d\'arrivée.';
   }
   return null;
 }
