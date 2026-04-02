@@ -55,16 +55,35 @@ class VoyageBookingService {
       if (tripError != null) throw Exception(tripError);
 
       final int baseCapacity = _toInt(trip['seats'], 0);
-      final int availableSeats = usesOccurrences
-          ? await _readAvailableSeatsForOccurrence(
-              transaction: transaction,
-              tripRef: tripRef,
-              effectiveDepartureDate: effectiveDepartureDate,
-              baseCapacity: baseCapacity,
-            )
-          : baseCapacity;
-      if (availableSeats < input.requestedSeats) {
-        throw Exception('Places insuffisantes pour cette date.');
+      final Map<String, dynamic>? segmentOccupancy =
+          trip['segmentOccupancy'] is Map ? Map<String, dynamic>.from(trip['segmentOccupancy'] as Map) : null;
+      final bool usesSegments = segmentOccupancy != null && segmentOccupancy.isNotEmpty;
+
+      if (usesSegments) {
+        final List<String> coveredKeys = _coveredSegmentKeys(
+          segmentOccupancy: segmentOccupancy,
+          from: input.segmentFrom,
+          to: input.segmentTo,
+        );
+        if (coveredKeys.isEmpty) throw Exception('Segment invalide pour ce trajet.');
+        _checkSegmentCapacity(
+          segmentOccupancy: segmentOccupancy,
+          coveredKeys: coveredKeys,
+          requestedSeats: input.requestedSeats,
+          capacity: baseCapacity,
+        );
+      } else {
+        final int availableSeats = usesOccurrences
+            ? await _readAvailableSeatsForOccurrence(
+                transaction: transaction,
+                tripRef: tripRef,
+                effectiveDepartureDate: effectiveDepartureDate,
+                baseCapacity: baseCapacity,
+              )
+            : baseCapacity;
+        if (availableSeats < input.requestedSeats) {
+          throw Exception('Places insuffisantes pour cette date.');
+        }
       }
       final int totalPrice = computeVoyageBookingTotalPrice(
         segmentPrice: input.segmentPrice,
@@ -157,7 +176,29 @@ class VoyageBookingService {
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      if (usesOccurrences) {
+      if (usesSegments) {
+        final List<String> coveredKeys = _coveredSegmentKeys(
+          segmentOccupancy: segmentOccupancy,
+          from: input.segmentFrom,
+          to: input.segmentTo,
+        );
+        final Map<String, dynamic> updatedOccupancy = _updatedOccupancy(
+          segmentOccupancy: segmentOccupancy,
+          coveredKeys: coveredKeys,
+          seats: input.requestedSeats,
+          increment: true,
+        );
+        transaction.update(tripRef, <String, dynamic>{
+          'segmentOccupancy': updatedOccupancy,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } else if (usesOccurrences) {
+        final int availableSeats = await _readAvailableSeatsForOccurrence(
+          transaction: transaction,
+          tripRef: tripRef,
+          effectiveDepartureDate: effectiveDepartureDate,
+          baseCapacity: baseCapacity,
+        );
         final int nextRemainingSeats = availableSeats - input.requestedSeats;
         transaction.set(
           _occurrenceRef(tripRef, effectiveDepartureDate),
@@ -173,6 +214,7 @@ class VoyageBookingService {
           SetOptions(merge: true),
         );
       } else {
+        final int availableSeats = baseCapacity;
         transaction.update(tripRef, <String, dynamic>{
           'seats': availableSeats - input.requestedSeats,
           'updatedAt': FieldValue.serverTimestamp(),
@@ -491,8 +533,33 @@ class VoyageBookingService {
           _normalizedTripFrequency(_toStringSafe(booking['tripFrequency']));
       final String tripDepartureDate = _toStringSafe(booking['tripDepartureDate']);
       final bool usesOccurrences = tripFrequency != 'none';
+      final Map<String, dynamic>? tripSegmentOccupancy =
+          tripSnap.data()!['segmentOccupancy'] is Map
+              ? Map<String, dynamic>.from(tripSnap.data()!['segmentOccupancy'] as Map)
+              : null;
+      final bool usesSegments = tripSegmentOccupancy != null && tripSegmentOccupancy.isNotEmpty;
 
-      if (usesOccurrences && tripDepartureDate.isNotEmpty) {
+      if (usesSegments) {
+        final String segFrom = _toStringSafe(booking['segmentFrom']);
+        final String segTo = _toStringSafe(booking['segmentTo']);
+        final List<String> coveredKeys = _coveredSegmentKeys(
+          segmentOccupancy: tripSegmentOccupancy,
+          from: segFrom,
+          to: segTo,
+        );
+        if (coveredKeys.isNotEmpty) {
+          final Map<String, dynamic> updatedOccupancy = _updatedOccupancy(
+            segmentOccupancy: tripSegmentOccupancy,
+            coveredKeys: coveredKeys,
+            seats: requestedSeats,
+            increment: false,
+          );
+          transaction.update(tripRef, <String, dynamic>{
+            'segmentOccupancy': updatedOccupancy,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      } else if (usesOccurrences && tripDepartureDate.isNotEmpty) {
         final DocumentReference<Map<String, dynamic>> occRef =
             _occurrenceRef(tripRef, tripDepartureDate);
         final DocumentSnapshot<Map<String, dynamic>> occSnap =
@@ -659,6 +726,59 @@ class VoyageBookingService {
     if (value is int) return value;
     if (value is num) return value.toInt();
     return int.tryParse('$value') ?? fallback;
+  }
+
+  /// Retourne les clés de tronçons couverts par un segment [from] → [to]
+  /// en se basant sur la map segmentOccupancy du trajet.
+  List<String> _coveredSegmentKeys({
+    required Map<String, dynamic> segmentOccupancy,
+    required String from,
+    required String to,
+  }) {
+    final List<String> keys = segmentOccupancy.keys.toList();
+    // Reconstituer l'ordre des points depuis les clés (A__B, B__C, C__D)
+    if (keys.isEmpty) return const <String>[];
+    final List<String> points = <String>[];
+    for (final String key in keys) {
+      final List<String> parts = key.split('__');
+      if (parts.length != 2) continue;
+      if (points.isEmpty) points.add(parts[0]);
+      points.add(parts[1]);
+    }
+    final int fromIdx = points.indexWhere((p) => p.trim() == from.trim());
+    final int toIdx = points.indexWhere((p) => p.trim() == to.trim());
+    if (fromIdx < 0 || toIdx < 0 || toIdx <= fromIdx) return const <String>[];
+    return keys.sublist(fromIdx, toIdx);
+  }
+
+  /// Vérifie la dispo par tronçon et lève une exception si insuffisant.
+  void _checkSegmentCapacity({
+    required Map<String, dynamic> segmentOccupancy,
+    required List<String> coveredKeys,
+    required int requestedSeats,
+    required int capacity,
+  }) {
+    for (final String key in coveredKeys) {
+      final int occupied = _toInt(segmentOccupancy[key], 0);
+      if (occupied + requestedSeats > capacity) {
+        throw Exception('Places insuffisantes sur le tronçon "$key".');
+      }
+    }
+  }
+
+  /// Incrémente ou décrémente l'occupancy des tronçons couverts.
+  Map<String, dynamic> _updatedOccupancy({
+    required Map<String, dynamic> segmentOccupancy,
+    required List<String> coveredKeys,
+    required int seats,
+    required bool increment,
+  }) {
+    final Map<String, dynamic> updated = Map<String, dynamic>.from(segmentOccupancy);
+    for (final String key in coveredKeys) {
+      final int current = _toInt(updated[key], 0);
+      updated[key] = increment ? current + seats : (current - seats).clamp(0, 1 << 30);
+    }
+    return updated;
   }
 }
 
