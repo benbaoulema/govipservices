@@ -126,6 +126,7 @@ class TripDetailCubit extends ChangeNotifier {
         tripFrequency: trip.tripFrequency,
         effectiveDepartureDate: _selectedDisplayDate ?? '',
         fallbackSeats: trip.seats,
+        segmentOccupancy: trip.segmentOccupancy,
       );
       final int clampedSeats = _state.selectedSeats.clamp(
         1,
@@ -242,6 +243,7 @@ class TripDetailCubit extends ChangeNotifier {
       tripFrequency: trip.tripFrequency,
       effectiveDepartureDate: normalized,
       fallbackSeats: trip.seats,
+      segmentOccupancy: trip.segmentOccupancy,
     );
     final int nextSelectedSeats = _state.selectedSeats.clamp(
       1,
@@ -349,7 +351,35 @@ class TripDetailCubit extends ChangeNotifier {
     required String tripFrequency,
     required String effectiveDepartureDate,
     required int fallbackSeats,
+    Map<String, int> segmentOccupancy = const <String, int>{},
   }) async {
+    // Yield management : calcul par tronçon si segmentOccupancy existe
+    if (segmentOccupancy.isNotEmpty) {
+      final String from = _args.from.trim();
+      final String to = _args.to.trim();
+      final List<String> keys = segmentOccupancy.keys.toList();
+      final List<String> points = <String>[];
+      for (final String key in keys) {
+        final List<String> parts = key.split('__');
+        if (parts.length != 2) continue;
+        if (points.isEmpty) points.add(parts[0]);
+        points.add(parts[1]);
+      }
+      final int fromIdx = points.indexWhere((p) => p.trim() == from);
+      final int toIdx = points.indexWhere((p) => p.trim() == to);
+      if (fromIdx >= 0 && toIdx > fromIdx) {
+        final List<String> covered = keys.sublist(fromIdx, toIdx);
+        int maxOccupied = 0;
+        for (final String key in covered) {
+          final int occ = segmentOccupancy[key] ?? 0;
+          if (occ > maxOccupied) maxOccupied = occ;
+        }
+        return (fallbackSeats - maxOccupied).clamp(0, fallbackSeats);
+      }
+      return fallbackSeats;
+    }
+
+    // Ancienne logique : occurrence pour trajets fréquents
     if (tripFrequency.trim() == 'none' || effectiveDepartureDate.trim().isEmpty) {
       return fallbackSeats;
     }

@@ -63,7 +63,21 @@ class TripDetailRepositoryImpl implements TripDetailRepository {
       intermediateStops: stops,
       status: _str(raw['status']).isEmpty ? 'published' : _str(raw['status']),
       isBus: raw['isBus'] == true,
+      segmentOccupancy: _parseSegmentOccupancy(raw['segmentOccupancy']),
     );
+  }
+
+  Map<String, int> _parseSegmentOccupancy(Object? value) {
+    if (value is! Map) return const <String, int>{};
+    final Map<String, int> result = <String, int>{};
+    for (final entry in value.entries) {
+      final String key = entry.key.toString();
+      final int v = entry.value is int
+          ? entry.value as int
+          : (entry.value is num ? (entry.value as num).toInt() : 0);
+      result[key] = v;
+    }
+    return result;
   }
 
   String _str(Object? value) => value is String ? value.trim() : '';
