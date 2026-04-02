@@ -19,6 +19,7 @@ class TripDetailRepositoryImpl implements TripDetailRepository {
     final List<TripStopModel> stops = stopsRaw
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
+        .where((s) => s['toStop'] == null)
         .map(
           (s) => TripStopModel(
             id: _str(s['id']).isEmpty ? _str(s['address']) : _str(s['id']),
