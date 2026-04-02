@@ -256,6 +256,7 @@ VoyageTripSearchItem? mapTripDoc(String id, Map<String, dynamic> raw) {
   final List<TripStopModel> stops = stopsRaw
       .whereType<Map>()
       .map((e) => Map<String, dynamic>.from(e))
+      .where((m) => m['toStop'] == null)
       .map(TripStopModel.fromMap)
       .where((s) => s.address.trim().isNotEmpty)
       .toList(growable: false);

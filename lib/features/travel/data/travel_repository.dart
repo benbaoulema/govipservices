@@ -579,9 +579,15 @@ class TravelRepository implements TravelService {
     required _RouteNode toNode,
     required String departureTime,
   }) async {
-    if (fromNode.kind != 'stop' || toNode.kind != 'stop') return null;
+    // Départ initial → arrêt intermédiaire : utiliser l'heure estimée de l'arrêt
+    if (fromNode.kind != 'stop' && toNode.kind == 'stop') {
+      return toNode.time.trim().isEmpty ? null : toNode.time.trim();
+    }
+    // Arrêt intermédiaire → destination finale : garder arrivalEstimatedTime du trajet
+    if (toNode.kind != 'stop') return null;
+    // Arrêt intermédiaire → arrêt intermédiaire : calculer via Google Maps
     if (fromNode.lat == null || fromNode.lng == null || toNode.lat == null || toNode.lng == null) {
-      return null;
+      return toNode.time.trim().isEmpty ? null : toNode.time.trim();
     }
     if (departureTime.trim().isEmpty) return null;
 
@@ -1016,7 +1022,7 @@ _TripCardSegmentView? buildTripCardSegmentView({
       (trip.raw['intermediateStops'] as List<dynamic>? ?? const <dynamic>[])
           .whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e))
-          .where((s) => s['bookable'] != false)
+          .where((s) => s['bookable'] != false && s['toStop'] == null)
           .toList(growable: false);
 
   final List<_RouteNode> nodes = buildRouteNodes(

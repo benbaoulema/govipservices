@@ -61,6 +61,7 @@ class _IntermediateStop {
     this.selected = true,
     this.source = 'manual',
     this.bookable = true,
+    this.toStop,
   });
 
   final String id;
@@ -72,6 +73,8 @@ class _IntermediateStop {
   final bool selected;
   final String source;
   final bool bookable;
+  /// Null = vers la destination finale. Non-null = vers un arrêt intermédiaire.
+  final String? toStop;
 
   _IntermediateStop copyWith({
     String? id,
@@ -83,6 +86,7 @@ class _IntermediateStop {
     bool? selected,
     String? source,
     bool? bookable,
+    String? toStop,
   }) {
     return _IntermediateStop(
       id: id ?? this.id,
@@ -94,6 +98,7 @@ class _IntermediateStop {
       selected: selected ?? this.selected,
       source: source ?? this.source,
       bookable: bookable ?? this.bookable,
+      toStop: toStop ?? this.toStop,
     );
   }
 }
@@ -736,7 +741,67 @@ class _AddTripPageState extends State<AddTripPage> {
       );
       return;
     }
+    if (_steps[_stepIndex] == _TripStep.stops) {
+      final List<_IntermediateStop> routeStops = _intermediateStops
+          .where((s) => s.selected && s.toStop == null)
+          .toList();
+      if (routeStops.length >= 2) {
+        _offerSegmentConfig(routeStops);
+        return;
+      }
+    }
     _setStepIndex((_stepIndex + 1).clamp(0, _steps.length - 1), isForward: true);
+  }
+
+  void _offerSegmentConfig(List<_IntermediateStop> routeStops) {
+    final String example = '${routeStops[0].address} → ${routeStops[1].address}';
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Configuration complète ?'),
+        content: Text(
+          'Voulez-vous définir les prix pour les trajets entre arrêts intermédiaires ?\n\nEx: $example',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _setStepIndex((_stepIndex + 1).clamp(0, _steps.length - 1), isForward: true);
+            },
+            child: const Text('Non, continuer'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _openSegmentConfigSheet(routeStops);
+            },
+            child: const Text('Oui, configurer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openSegmentConfigSheet(List<_IntermediateStop> routeStops) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext ctx) => _SegmentConfigSheet(
+        stops: routeStops,
+        currency: _currency,
+        existingSegments: _intermediateStops.where((s) => s.toStop != null).toList(),
+        onSaved: (List<_IntermediateStop> segments) {
+          setState(() {
+            _intermediateStops.removeWhere((s) => s.toStop != null);
+            _intermediateStops.addAll(segments);
+          });
+          _setStepIndex((_stepIndex + 1).clamp(0, _steps.length - 1), isForward: true);
+        },
+      ),
+    );
   }
 
   void _dismissKeyboard() {
@@ -1315,6 +1380,7 @@ class _AddTripPageState extends State<AddTripPage> {
             'lng': stop.lng,
             'source': stop.source,
             'bookable': stop.bookable,
+            'toStop': stop.toStop,
           },
         )
         .toList(growable: false);
@@ -3149,6 +3215,168 @@ class _SeatActionButton extends StatelessWidget {
           width: 52,
           child: Icon(icon, color: Colors.white),
         ),
+      ),
+    );
+  }
+}
+
+class _SegmentConfigSheet extends StatefulWidget {
+  const _SegmentConfigSheet({
+    required this.stops,
+    required this.currency,
+    required this.existingSegments,
+    required this.onSaved,
+  });
+
+  final List<_IntermediateStop> stops;
+  final String currency;
+  final List<_IntermediateStop> existingSegments;
+  final void Function(List<_IntermediateStop>) onSaved;
+
+  @override
+  State<_SegmentConfigSheet> createState() => _SegmentConfigSheetState();
+}
+
+class _SegmentConfigSheetState extends State<_SegmentConfigSheet> {
+  late final List<({_IntermediateStop from, _IntermediateStop to, TextEditingController ctrl})> _segments;
+
+  @override
+  void initState() {
+    super.initState();
+    _segments = [];
+    final stops = widget.stops;
+    for (int i = 0; i < stops.length; i++) {
+      for (int j = i + 1; j < stops.length; j++) {
+        final _IntermediateStop from = stops[i];
+        final _IntermediateStop to = stops[j];
+        final _IntermediateStop? existing = widget.existingSegments
+            .where((s) => s.address == from.address && s.toStop == to.address)
+            .firstOrNull;
+        _segments.add((
+          from: from,
+          to: to,
+          ctrl: TextEditingController(
+            text: existing != null ? existing.priceFromDeparture.toStringAsFixed(0) : '0',
+          ),
+        ));
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final seg in _segments) {
+      seg.ctrl.dispose();
+    }
+    super.dispose();
+  }
+
+  void _save() {
+    final List<_IntermediateStop> result = _segments.map((seg) {
+      final double price =
+          double.tryParse(seg.ctrl.text.trim().replaceAll(',', '.')) ?? 0;
+      return _IntermediateStop(
+        id: '${seg.from.id}_${seg.to.id}',
+        address: seg.from.address,
+        estimatedTime: seg.from.estimatedTime,
+        priceFromDeparture: price,
+        lat: seg.from.lat,
+        lng: seg.from.lng,
+        selected: true,
+        source: 'segment',
+        bookable: true,
+        toStop: seg.to.address,
+      );
+    }).toList();
+    widget.onSaved(result);
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        left: 16,
+        right: 16,
+        top: 16,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Prix entre arrêts intermédiaires',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Définissez le prix pour chaque segment entre arrêts.',
+            style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+          ),
+          const SizedBox(height: 16),
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.45,
+            ),
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: _segments.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (_, int i) {
+                final seg = _segments[i];
+                return Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        '${seg.from.address} → ${seg.to.address}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 110,
+                      child: TextFormField(
+                        controller: seg.ctrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: widget.currency,
+                          border: const OutlineInputBorder(),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 10,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _save,
+              child: const Text('Enregistrer et continuer'),
+            ),
+          ),
+        ],
       ),
     );
   }
