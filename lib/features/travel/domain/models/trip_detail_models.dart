@@ -90,6 +90,8 @@ class TripDetailModel {
     required this.intermediateStops,
     required this.status,
     this.isBus = false,
+    this.segmentOccupancy = const <String, int>{},
+    this.segmentPoints = const <String>[],
   });
 
   final String id;
@@ -110,6 +112,8 @@ class TripDetailModel {
   final List<TripStopModel> intermediateStops;
   final String status;
   final bool isBus;
+  final Map<String, int> segmentOccupancy;
+  final List<String> segmentPoints;
 }
 
 class TripRouteNode {

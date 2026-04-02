@@ -210,6 +210,11 @@ class _EditTripPageState extends State<EditTripPage> {
 
     try {
       final Map<String, dynamic> existing = _existingTrip!;
+      final List<String> segmentPoints = _buildSegmentPoints();
+      final Map<String, dynamic> segmentOccupancy = _buildSegmentOccupancy(
+        existing['segmentOccupancy'],
+        segmentPoints: segmentPoints,
+      );
       final Map<String, dynamic> payload = <String, dynamic>{
         'departurePlace': _departureController.text.trim(),
         'arrivalPlace': _arrivalController.text.trim(),
@@ -221,6 +226,8 @@ class _EditTripPageState extends State<EditTripPage> {
         'currency': _currency,
         'vehiclePhotoUrl': existing['vehiclePhotoUrl'],
         'intermediateStops': _intermediateStops,
+        'segmentPoints': segmentPoints,
+        'segmentOccupancy': segmentOccupancy,
         'departureDate': _formatApiDate(_departureDate),
         'departureTime': _formatTime(_departureTime),
         'seats': int.tryParse(_seatsController.text.trim()) ?? 1,
@@ -257,6 +264,35 @@ class _EditTripPageState extends State<EditTripPage> {
         });
       }
     }
+  }
+
+  List<String> _buildSegmentPoints() {
+    return <String>[
+      _departureController.text.trim(),
+      ..._intermediateStops
+          .where((s) => s['toStop'] == null)
+          .map((s) => (s['address'] ?? '').toString().trim()),
+      _arrivalController.text.trim(),
+    ].where((address) => address.isNotEmpty).toList(growable: false);
+  }
+
+  Map<String, dynamic> _buildSegmentOccupancy(
+    Object? existingOccupancy, {
+    required List<String> segmentPoints,
+  }) {
+    final Map<String, dynamic> previous = existingOccupancy is Map
+        ? Map<String, dynamic>.from(existingOccupancy)
+        : <String, dynamic>{};
+    final Map<String, dynamic> next = <String, dynamic>{};
+    for (int i = 0; i < segmentPoints.length - 1; i++) {
+      final String key = '${segmentPoints[i]}__${segmentPoints[i + 1]}';
+      final Object? rawValue = previous[key];
+      final int value = rawValue is int
+          ? rawValue
+          : (rawValue is num ? rawValue.toInt() : int.tryParse('$rawValue') ?? 0);
+      next[key] = value;
+    }
+    return next;
   }
 
   @override

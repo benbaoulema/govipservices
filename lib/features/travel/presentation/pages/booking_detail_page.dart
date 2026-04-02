@@ -102,6 +102,12 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
   Widget build(BuildContext context) {
     final String statusLabel = _bookingStatusLabel(_booking.status);
     final String totalPrice = '${_booking.totalPrice} ${_booking.tripCurrency.isEmpty ? 'XOF' : _booking.tripCurrency}';
+    final String displayDeparture = _booking.segmentFrom.trim().isEmpty
+        ? _booking.tripDeparturePlace
+        : _booking.segmentFrom.trim();
+    final String displayArrival = _booking.segmentTo.trim().isEmpty
+        ? _booking.tripArrivalPlace
+        : _booking.segmentTo.trim();
 
     return Scaffold(
       appBar: AppBar(
@@ -157,8 +163,8 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
         children: [
           _BookingHeroCard(
-            departure: _booking.tripDeparturePlace,
-            arrival: _booking.tripArrivalPlace,
+            departure: displayDeparture,
+            arrival: displayArrival,
             statusLabel: statusLabel,
             trackNum: _booking.trackNum,
           ),

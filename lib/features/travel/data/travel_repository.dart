@@ -164,6 +164,19 @@ class TravelRepository implements TravelService {
         raw['arrivalEstimatedTime'] = segmentArrivalTime;
       }
 
+      final int capacity = trip.seats ?? 0;
+      final Map<String, dynamic> segmentCapacityRaw = await _resolveSegmentCapacityRaw(
+        trip: trip,
+        effectiveDepartureDate: date,
+      );
+      final int segmentAvailableSeats = _computeSegmentAvailableSeats(
+        raw: segmentCapacityRaw,
+        fromAddress: fromNode.address.isEmpty ? trip.departurePlace : fromNode.address,
+        toAddress: toNode.address.isEmpty ? trip.arrivalPlace : toNode.address,
+        capacity: capacity,
+      );
+      raw['segmentAvailableSeats'] = segmentAvailableSeats;
+
       results.add(
         TripSearchResult(
           id: trip.id,
@@ -196,6 +209,41 @@ class TravelRepository implements TravelService {
     });
 
     return results;
+  }
+
+  Future<Map<String, dynamic>> _resolveSegmentCapacityRaw({
+    required TripSearchResult trip,
+    required String effectiveDepartureDate,
+  }) async {
+    final String normalizedFrequency = trip.tripFrequency.trim().toLowerCase();
+    final bool usesOccurrences = normalizedFrequency != 'none';
+    if (!usesOccurrences || effectiveDepartureDate.trim().isEmpty) {
+      return trip.raw;
+    }
+    try {
+      final DocumentSnapshot<Map<String, dynamic>> occurrenceSnapshot = await _firestore
+          .collection('voyageTrips')
+          .doc(trip.id)
+          .collection('occurrences')
+          .doc(effectiveDepartureDate)
+          .get();
+      final Map<String, dynamic>? occurrence = occurrenceSnapshot.data();
+      if (occurrence == null) return trip.raw;
+      return <String, dynamic>{
+        ...trip.raw,
+        if (occurrence['segmentOccupancy'] is Map)
+          'segmentOccupancy': Map<String, dynamic>.from(occurrence['segmentOccupancy'] as Map),
+        if (occurrence['segmentPoints'] is List)
+          'segmentPoints': (occurrence['segmentPoints'] as List<dynamic>)
+              .map((e) => e.toString().trim())
+              .where((e) => e.isNotEmpty)
+              .toList(growable: false),
+        if (occurrence.containsKey('remainingSeats'))
+          'remainingSeats': occurrence['remainingSeats'],
+      };
+    } catch (_) {
+      return trip.raw;
+    }
   }
 
   Future<List<TripSearchResult>> fetchFeaturedProTrips({int limit = 6}) async {
@@ -1009,6 +1057,61 @@ int findNodeIndexByQuery(List<_RouteNode> nodes, String queryAddress, {int after
   for (int i = 0; i < nodes.length; i++) {
     if (i <= afterIndex) continue;
     if (matchesAddressQuery(queryAddress, nodes[i].address)) return i;
+  }
+  return -1;
+}
+
+int _computeSegmentAvailableSeats({
+  required Map<String, dynamic> raw,
+  required String fromAddress,
+  required String toAddress,
+  required int capacity,
+}) {
+  final Object? occ = raw['segmentOccupancy'];
+  if (occ is! Map || occ.isEmpty) {
+    final Object? remainingSeats = raw['remainingSeats'];
+    if (remainingSeats is int) {
+      final int parsed = remainingSeats;
+      return parsed < 0 ? 0 : (parsed > capacity ? capacity : parsed);
+    }
+    if (remainingSeats is num) {
+      final int parsed = remainingSeats.toInt();
+      return parsed < 0 ? 0 : (parsed > capacity ? capacity : parsed);
+    }
+    return capacity;
+  }
+  final Map<String, dynamic> occupancy = Map<String, dynamic>.from(occ);
+
+  // Utiliser segmentPoints (array ordonné) pour éviter les problèmes d'ordre Firestore
+  final List<String> points = (raw['segmentPoints'] as List<dynamic>? ?? const <dynamic>[])
+      .map((e) => e.toString().trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
+  if (points.length < 2) return capacity;
+
+  final int fromIdx = _findSegmentPointIndex(points, fromAddress);
+  final int toIdx = _findSegmentPointIndex(points, toAddress, afterIndex: fromIdx);
+  if (fromIdx < 0 || toIdx < 0 || toIdx <= fromIdx) return capacity;
+
+  int maxOccupied = 0;
+  for (int i = fromIdx; i < toIdx; i++) {
+    final String key = '${points[i]}__${points[i + 1]}';
+    final int occupied = (occupancy[key] as num?)?.toInt() ?? 0;
+    if (occupied > maxOccupied) maxOccupied = occupied;
+  }
+  return (capacity - maxOccupied).clamp(0, capacity);
+}
+
+int _findSegmentPointIndex(
+  List<String> points,
+  String query, {
+  int afterIndex = -1,
+}) {
+  final String normalizedQuery = query.trim();
+  if (normalizedQuery.isEmpty) return -1;
+  for (int i = 0; i < points.length; i++) {
+    if (i <= afterIndex) continue;
+    if (matchesAddressQuery(normalizedQuery, points[i])) return i;
   }
   return -1;
 }

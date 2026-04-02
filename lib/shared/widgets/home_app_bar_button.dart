@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -52,15 +50,6 @@ class _HomeAppBarButtonState extends State<HomeAppBarButton> {
 
   @override
   Widget build(BuildContext context) {
-    // Sur iOS avec une page derrière : chevron retour simple — pas de menu
-    if (Platform.isIOS && Navigator.canPop(context)) {
-      return IconButton(
-        tooltip: 'Retour',
-        onPressed: () => Navigator.of(context).maybePop(),
-        icon: const Icon(Icons.chevron_left, size: 32),
-      );
-    }
-
     return IconButton(
       tooltip: 'Menu',
       icon: const Icon(Icons.menu_rounded),

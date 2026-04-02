@@ -1,5 +1,5 @@
-import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:govipservices/features/travel/domain/models/trip_detail_models.dart';
 import 'package:govipservices/features/travel/domain/usecases/trip_detail_usecases.dart';
 import 'package:govipservices/features/travel/presentation/state/trip_detail_state.dart';
@@ -50,7 +50,8 @@ class TripDetailCubit extends ChangeNotifier {
     return trip != null && trip.tripFrequency.trim() == 'daily';
   }
 
-  bool get showAutoAdjustedDateNotice => canSelectTravelDate && _autoAdjustedToNextDay;
+  bool get showAutoAdjustedDateNotice =>
+      canSelectTravelDate && _autoAdjustedToNextDay;
 
   String get autoAdjustedDateMessage {
     final TripDetailModel? trip = _state.trip;
@@ -107,18 +108,23 @@ class TripDetailCubit extends ChangeNotifier {
           status: TripDetailStatus.invalidSegment,
           trip: trip,
           nodes: nodes,
-          errorMessage: 'Segment invalide: point de montee/descente introuvable sur ce trajet.',
+          errorMessage:
+              'Segment invalide: point de montee/descente introuvable sur ce trajet.',
         );
         notifyListeners();
         return;
       }
 
-      final String? computedArrivalTime = await _computeSegmentArrivalTime(segment: segment);
-      final TripSegmentModel finalSegment = computedArrivalTime == null || computedArrivalTime.isEmpty
-          ? segment
-          : segment.copyWith(
-              arrivalNode: segment.arrivalNode.copyWith(time: computedArrivalTime),
-            );
+      final String? computedArrivalTime =
+          await _computeSegmentArrivalTime(segment: segment);
+      final TripSegmentModel finalSegment =
+          computedArrivalTime == null || computedArrivalTime.isEmpty
+              ? segment
+              : segment.copyWith(
+                  arrivalNode: segment.arrivalNode.copyWith(
+                    time: computedArrivalTime,
+                  ),
+                );
 
       _selectedDisplayDate = _resolveInitialDisplayDate(trip);
       final int effectiveAvailableSeats = await _resolveAvailableSeats(
@@ -126,6 +132,10 @@ class TripDetailCubit extends ChangeNotifier {
         tripFrequency: trip.tripFrequency,
         effectiveDepartureDate: _selectedDisplayDate ?? '',
         fallbackSeats: trip.seats,
+        segmentOccupancy: trip.segmentOccupancy,
+        segmentPoints: trip.segmentPoints,
+        fromAddress: finalSegment.departureNode.address,
+        toAddress: finalSegment.arrivalNode.address,
       );
       final int clampedSeats = _state.selectedSeats.clamp(
         1,
@@ -191,14 +201,38 @@ class TripDetailCubit extends ChangeNotifier {
     );
     if (nextSegment == null) return;
 
-    final String? computedArrivalTime = await _computeSegmentArrivalTime(segment: nextSegment);
-    final TripSegmentModel finalSegment = computedArrivalTime == null || computedArrivalTime.isEmpty
-        ? nextSegment
-        : nextSegment.copyWith(
-            arrivalNode: nextSegment.arrivalNode.copyWith(time: computedArrivalTime),
-          );
+    final String? computedArrivalTime =
+        await _computeSegmentArrivalTime(segment: nextSegment);
+    final TripSegmentModel finalSegment =
+        computedArrivalTime == null || computedArrivalTime.isEmpty
+            ? nextSegment
+            : nextSegment.copyWith(
+                arrivalNode: nextSegment.arrivalNode.copyWith(
+                  time: computedArrivalTime,
+                ),
+              );
 
-    _state = _state.copyWith(segment: finalSegment);
+    final TripDetailModel? trip = _state.trip;
+    if (trip == null) return;
+    final int availableSeats = await _resolveAvailableSeats(
+      tripId: trip.id,
+      tripFrequency: trip.tripFrequency,
+      effectiveDepartureDate: displayDate,
+      fallbackSeats: trip.seats,
+      segmentOccupancy: trip.segmentOccupancy,
+      segmentPoints: trip.segmentPoints,
+      fromAddress: finalSegment.departureNode.address,
+      toAddress: finalSegment.arrivalNode.address,
+    );
+    final int nextSelectedSeats = _state.selectedSeats.clamp(
+      1,
+      availableSeats < 1 ? 1 : availableSeats,
+    );
+    _state = _state.copyWith(
+      segment: finalSegment,
+      availableSeats: availableSeats,
+      selectedSeats: nextSelectedSeats,
+    );
     notifyListeners();
   }
 
@@ -216,14 +250,38 @@ class TripDetailCubit extends ChangeNotifier {
     );
     if (nextSegment == null) return;
 
-    final String? computedArrivalTime = await _computeSegmentArrivalTime(segment: nextSegment);
-    final TripSegmentModel finalSegment = computedArrivalTime == null || computedArrivalTime.isEmpty
-        ? nextSegment
-        : nextSegment.copyWith(
-            arrivalNode: nextSegment.arrivalNode.copyWith(time: computedArrivalTime),
-          );
+    final String? computedArrivalTime =
+        await _computeSegmentArrivalTime(segment: nextSegment);
+    final TripSegmentModel finalSegment =
+        computedArrivalTime == null || computedArrivalTime.isEmpty
+            ? nextSegment
+            : nextSegment.copyWith(
+                arrivalNode: nextSegment.arrivalNode.copyWith(
+                  time: computedArrivalTime,
+                ),
+              );
 
-    _state = _state.copyWith(segment: finalSegment);
+    final TripDetailModel? trip = _state.trip;
+    if (trip == null) return;
+    final int availableSeats = await _resolveAvailableSeats(
+      tripId: trip.id,
+      tripFrequency: trip.tripFrequency,
+      effectiveDepartureDate: displayDate,
+      fallbackSeats: trip.seats,
+      segmentOccupancy: trip.segmentOccupancy,
+      segmentPoints: trip.segmentPoints,
+      fromAddress: finalSegment.departureNode.address,
+      toAddress: finalSegment.arrivalNode.address,
+    );
+    final int nextSelectedSeats = _state.selectedSeats.clamp(
+      1,
+      availableSeats < 1 ? 1 : availableSeats,
+    );
+    _state = _state.copyWith(
+      segment: finalSegment,
+      availableSeats: availableSeats,
+      selectedSeats: nextSelectedSeats,
+    );
     notifyListeners();
   }
 
@@ -242,6 +300,10 @@ class TripDetailCubit extends ChangeNotifier {
       tripFrequency: trip.tripFrequency,
       effectiveDepartureDate: normalized,
       fallbackSeats: trip.seats,
+      segmentOccupancy: trip.segmentOccupancy,
+      segmentPoints: trip.segmentPoints,
+      fromAddress: _state.segment?.departureNode.address,
+      toAddress: _state.segment?.arrivalNode.address,
     );
     final int nextSelectedSeats = _state.selectedSeats.clamp(
       1,
@@ -280,8 +342,7 @@ class TripDetailCubit extends ChangeNotifier {
         }
       }
     }
-    final String computed = _defaultDisplayDateForTrip(trip);
-    return computed;
+    return _defaultDisplayDateForTrip(trip);
   }
 
   String _defaultDisplayDateForTrip(TripDetailModel trip) {
@@ -328,8 +389,7 @@ class TripDetailCubit extends ChangeNotifier {
   }
 
   _ParsedClock? _parseClock(String raw) {
-    final Match? match =
-        RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(raw.trim());
+    final Match? match = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(raw.trim());
     if (match == null) return null;
     final int? hour = int.tryParse(match.group(1)!);
     final int? minute = int.tryParse(match.group(2)!);
@@ -349,27 +409,84 @@ class TripDetailCubit extends ChangeNotifier {
     required String tripFrequency,
     required String effectiveDepartureDate,
     required int fallbackSeats,
+    Map<String, int> segmentOccupancy = const <String, int>{},
+    List<String> segmentPoints = const <String>[],
+    String? fromAddress,
+    String? toAddress,
   }) async {
-    if (tripFrequency.trim() == 'none' || effectiveDepartureDate.trim().isEmpty) {
-      return fallbackSeats;
-    }
+    final String normalizedTripFrequency = tripFrequency.trim().toLowerCase();
+    final bool usesOccurrences =
+        normalizedTripFrequency != 'none' && effectiveDepartureDate.trim().isNotEmpty;
+    Map<String, int> effectiveSegmentOccupancy = Map<String, int>.from(
+      segmentOccupancy,
+    );
+
     try {
-      final DocumentSnapshot<Map<String, dynamic>> occurrenceSnapshot =
-          await FirebaseFirestore.instance
-              .collection('voyageTrips')
-              .doc(tripId)
-              .collection('occurrences')
-              .doc(effectiveDepartureDate)
-              .get();
-      final Map<String, dynamic>? occurrence = occurrenceSnapshot.data();
-      if (occurrence == null) return fallbackSeats;
-      final Object? rawRemainingSeats = occurrence['remainingSeats'];
-      if (rawRemainingSeats is int) return rawRemainingSeats;
-      if (rawRemainingSeats is num) return rawRemainingSeats.toInt();
-      return int.tryParse('$rawRemainingSeats') ?? fallbackSeats;
+      if (usesOccurrences) {
+        final DocumentSnapshot<Map<String, dynamic>> occurrenceSnapshot =
+            await FirebaseFirestore.instance
+                .collection('voyageTrips')
+                .doc(tripId)
+                .collection('occurrences')
+                .doc(effectiveDepartureDate)
+                .get();
+        final Map<String, dynamic>? occurrence = occurrenceSnapshot.data();
+        if (occurrence != null) {
+          final Map<String, int> occurrenceSegmentOccupancy =
+              _parseSegmentOccupancy(occurrence['segmentOccupancy']);
+          if (occurrenceSegmentOccupancy.isNotEmpty) {
+            effectiveSegmentOccupancy = occurrenceSegmentOccupancy;
+          }
+          if (effectiveSegmentOccupancy.isEmpty || segmentPoints.length < 2) {
+            final Object? rawRemainingSeats = occurrence['remainingSeats'];
+            if (rawRemainingSeats is int) return rawRemainingSeats;
+            if (rawRemainingSeats is num) return rawRemainingSeats.toInt();
+            return int.tryParse('$rawRemainingSeats') ?? fallbackSeats;
+          }
+        } else if (effectiveSegmentOccupancy.isEmpty || segmentPoints.length < 2) {
+          return fallbackSeats;
+        }
+      } else if (effectiveSegmentOccupancy.isEmpty || segmentPoints.length < 2) {
+        return fallbackSeats;
+      }
     } catch (_) {
-      return fallbackSeats;
+      if (effectiveSegmentOccupancy.isEmpty || segmentPoints.length < 2) {
+        return fallbackSeats;
+      }
     }
+
+    if (effectiveSegmentOccupancy.isNotEmpty && segmentPoints.length >= 2) {
+      final String from = (fromAddress ?? _args.from).trim();
+      final String to = (toAddress ?? _args.to).trim();
+      final int fromIdx = segmentPoints.indexWhere((p) => p == from);
+      final int toIdx = segmentPoints.indexWhere((p) => p == to);
+      if (fromIdx >= 0 && toIdx > fromIdx) {
+        int maxOccupied = 0;
+        for (int i = fromIdx; i < toIdx; i++) {
+          final String key = '${segmentPoints[i]}__${segmentPoints[i + 1]}';
+          final int occ = effectiveSegmentOccupancy[key] ?? 0;
+          if (occ > maxOccupied) maxOccupied = occ;
+        }
+        return (fallbackSeats - maxOccupied).clamp(0, fallbackSeats);
+      }
+    }
+
+    return fallbackSeats;
+  }
+
+  Map<String, int> _parseSegmentOccupancy(Object? value) {
+    if (value is! Map) return const <String, int>{};
+    final Map<String, int> result = <String, int>{};
+    for (final MapEntry<dynamic, dynamic> entry in value.entries) {
+      final String key = entry.key.toString().trim();
+      if (key.isEmpty) continue;
+      final Object? rawValue = entry.value;
+      final int parsed = rawValue is int
+          ? rawValue
+          : (rawValue is num ? rawValue.toInt() : int.tryParse('$rawValue') ?? 0);
+      result[key] = parsed;
+    }
+    return result;
   }
 }
 
