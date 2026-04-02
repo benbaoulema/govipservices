@@ -1174,7 +1174,7 @@ class _TripResultTile extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
-                                isFull ? 'Complet' : '$dispo pl.',
+                                isFull ? 'Complet' : '$dispo pl. dispo',
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w800,

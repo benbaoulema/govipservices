@@ -1301,6 +1301,12 @@ class _ReservationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final String displayDeparture = booking.segmentFrom.trim().isEmpty
+        ? booking.tripDeparturePlace
+        : booking.segmentFrom.trim();
+    final String displayArrival = booking.segmentTo.trim().isEmpty
+        ? booking.tripArrivalPlace
+        : booking.segmentTo.trim();
     final String departureCountdown = _departureCountdownLabel(
       departureDate: booking.tripDepartureDate,
       departureTime: booking.tripDepartureTime,
@@ -1359,7 +1365,7 @@ class _ReservationCard extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               Text(
-                booking.tripDeparturePlace,
+                displayDeparture,
                 style: const TextStyle(
                   color: _reservationsText,
                   fontSize: 15,
@@ -1374,7 +1380,7 @@ class _ReservationCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                booking.tripArrivalPlace,
+                displayArrival,
                 style: const TextStyle(
                   color: _reservationsMuted,
                   fontSize: 14,
@@ -1604,7 +1610,7 @@ class _PublishedTripCard extends StatelessWidget {
                   ),
                   _TripMetaPill(
                     icon: Icons.event_seat_rounded,
-                    label: '$seats place${seats > 1 ? 's' : ''}',
+                    label: 'Cap. $seats place${seats > 1 ? 's' : ''}',
                   ),
                 ],
               ),

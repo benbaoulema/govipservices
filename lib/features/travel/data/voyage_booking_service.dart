@@ -55,24 +55,40 @@ class VoyageBookingService {
       if (tripError != null) throw Exception(tripError);
 
       final int baseCapacity = _toInt(trip['seats'], 0);
-      final Map<String, dynamic>? segmentOccupancy =
-          trip['segmentOccupancy'] is Map ? Map<String, dynamic>.from(trip['segmentOccupancy'] as Map) : null;
+      final Map<String, dynamic> tripSegmentOccupancy = _parseSegmentOccupancy(
+        trip['segmentOccupancy'],
+      );
       final List<String> segmentPoints = (trip['segmentPoints'] as List<dynamic>? ?? const <dynamic>[])
           .map((e) => e.toString().trim())
           .where((e) => e.isNotEmpty)
           .toList();
-      final bool usesSegments = segmentOccupancy != null && segmentOccupancy.isNotEmpty && segmentPoints.length >= 2;
+      final bool usesSegments = tripSegmentOccupancy.isNotEmpty && segmentPoints.length >= 2;
+      final DocumentReference<Map<String, dynamic>>? occurrenceRef = usesOccurrences
+          ? _occurrenceRef(tripRef, effectiveDepartureDate)
+          : null;
+      final Map<String, dynamic>? occurrence = occurrenceRef == null
+          ? null
+          : await _readOccurrence(
+              transaction: transaction,
+              occurrenceRef: occurrenceRef,
+            );
+      final Map<String, dynamic> effectiveSegmentOccupancy = usesOccurrences
+          ? _resolveOccurrenceSegmentOccupancy(
+              occurrence: occurrence,
+              fallbackSegmentOccupancy: tripSegmentOccupancy,
+            )
+          : tripSegmentOccupancy;
 
       if (usesSegments) {
         final List<String> coveredKeys = _coveredSegmentKeys(
           segmentPoints: segmentPoints,
-          segmentOccupancy: segmentOccupancy,
+          segmentOccupancy: effectiveSegmentOccupancy,
           from: input.segmentFrom,
           to: input.segmentTo,
         );
         if (coveredKeys.isEmpty) throw Exception('Ce trajet ne dessert pas ce parcours.');
         _checkSegmentCapacity(
-          segmentOccupancy: segmentOccupancy,
+          segmentOccupancy: effectiveSegmentOccupancy,
           coveredKeys: coveredKeys,
           requestedSeats: input.requestedSeats,
           capacity: baseCapacity,
@@ -184,20 +200,42 @@ class VoyageBookingService {
       if (usesSegments) {
         final List<String> coveredKeys = _coveredSegmentKeys(
           segmentPoints: segmentPoints,
-          segmentOccupancy: segmentOccupancy,
+          segmentOccupancy: effectiveSegmentOccupancy,
           from: input.segmentFrom,
           to: input.segmentTo,
         );
         final Map<String, dynamic> updatedOccupancy = _updatedOccupancy(
-          segmentOccupancy: segmentOccupancy,
+          segmentOccupancy: effectiveSegmentOccupancy,
           coveredKeys: coveredKeys,
           seats: input.requestedSeats,
           increment: true,
         );
-        transaction.update(tripRef, <String, dynamic>{
-          'segmentOccupancy': updatedOccupancy,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
+        if (usesOccurrences && occurrenceRef != null) {
+          final int nextRemainingSeats = _computeRemainingSeatsFromOccupancy(
+            segmentOccupancy: updatedOccupancy,
+            capacity: baseCapacity,
+          );
+          transaction.set(
+            occurrenceRef,
+            <String, dynamic>{
+              'date': effectiveDepartureDate,
+              'capacity': baseCapacity,
+              'segmentPoints': segmentPoints,
+              'segmentOccupancy': updatedOccupancy,
+              'bookedSeats': (baseCapacity - nextRemainingSeats).clamp(0, baseCapacity),
+              'remainingSeats': nextRemainingSeats,
+              'status': nextRemainingSeats > 0 ? 'active' : 'full',
+              'createdAt': FieldValue.serverTimestamp(),
+              'updatedAt': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true),
+          );
+        } else {
+          transaction.update(tripRef, <String, dynamic>{
+            'segmentOccupancy': updatedOccupancy,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
       } else if (usesOccurrences) {
         final int availableSeats = await _readAvailableSeatsForOccurrence(
           transaction: transaction,
@@ -403,15 +441,70 @@ class VoyageBookingService {
           );
           final String tripDepartureDate = booking.tripDepartureDate.trim();
           final bool usesOccurrences = tripFrequency != 'none';
+          final Map<String, dynamic> tripSegmentOccupancy = _parseSegmentOccupancy(
+            tripSnapshot.data()!['segmentOccupancy'],
+          );
+          final List<String> tripSegmentPoints = (tripSnapshot.data()!['segmentPoints'] as List<dynamic>? ?? const <dynamic>[])
+              .map((e) => e.toString().trim())
+              .where((e) => e.isNotEmpty)
+              .toList();
+          final bool usesSegments =
+              tripSegmentOccupancy.isNotEmpty && tripSegmentPoints.length >= 2;
 
           if (usesOccurrences && tripDepartureDate.isNotEmpty) {
             final DocumentReference<Map<String, dynamic>> occRef =
                 _occurrenceRef(tripRef, tripDepartureDate);
             final DocumentSnapshot<Map<String, dynamic>> occSnap =
                 await transaction.get(occRef);
-            if (occSnap.exists && occSnap.data() != null) {
-              final int currentRemaining = _toInt(occSnap.data()!['remainingSeats'], 0);
-              final int capacity = _toInt(occSnap.data()!['capacity'], 0);
+            final Map<String, dynamic>? occurrence =
+                occSnap.exists && occSnap.data() != null ? occSnap.data()! : null;
+            final int capacity = occurrence == null
+                ? _toInt(tripSnapshot.data()!['seats'], 0)
+                : _toInt(occurrence['capacity'], _toInt(tripSnapshot.data()!['seats'], 0));
+            if (usesSegments) {
+              final Map<String, dynamic> occurrenceSegmentOccupancy =
+                  _resolveOccurrenceSegmentOccupancy(
+                occurrence: occurrence,
+                fallbackSegmentOccupancy: tripSegmentOccupancy,
+              );
+              final List<String> coveredKeys = _coveredSegmentKeys(
+                segmentPoints: tripSegmentPoints,
+                segmentOccupancy: occurrenceSegmentOccupancy,
+                from: booking.segmentFrom,
+                to: booking.segmentTo,
+              );
+              if (coveredKeys.isNotEmpty) {
+                final bool consumedBefore = _statusConsumesSeat(previousStatus);
+                final bool consumedAfter = _statusConsumesSeat(normalizedStatus);
+                if (consumedBefore != consumedAfter) {
+                  final Map<String, dynamic> updatedOccupancy = _updatedOccupancy(
+                    segmentOccupancy: occurrenceSegmentOccupancy,
+                    coveredKeys: coveredKeys,
+                    seats: booking.requestedSeats,
+                    increment: consumedAfter,
+                  );
+                  final int nextRemaining = _computeRemainingSeatsFromOccupancy(
+                    segmentOccupancy: updatedOccupancy,
+                    capacity: capacity,
+                  );
+                  transaction.set(
+                    occRef,
+                    <String, dynamic>{
+                      'date': tripDepartureDate,
+                      'capacity': capacity,
+                      'segmentPoints': tripSegmentPoints,
+                      'segmentOccupancy': updatedOccupancy,
+                      'remainingSeats': nextRemaining,
+                      'bookedSeats': capacity - nextRemaining,
+                      'status': nextRemaining > 0 ? 'active' : 'full',
+                      'updatedAt': FieldValue.serverTimestamp(),
+                    },
+                    SetOptions(merge: true),
+                  );
+                }
+              }
+            } else if (occurrence != null) {
+              final int currentRemaining = _toInt(occurrence['remainingSeats'], 0);
               final int nextRemaining = _computeAvailableSeatsAfterStatusTransition(
                 availableSeats: currentRemaining,
                 requestedSeats: booking.requestedSeats,
@@ -428,6 +521,33 @@ class VoyageBookingService {
                 },
                 SetOptions(merge: true),
               );
+            }
+          } else if (usesSegments) {
+            final List<String> coveredKeys = _coveredSegmentKeys(
+              segmentPoints: tripSegmentPoints,
+              segmentOccupancy: tripSegmentOccupancy,
+              from: booking.segmentFrom,
+              to: booking.segmentTo,
+            );
+            if (coveredKeys.isNotEmpty) {
+              final bool consumedBefore = _statusConsumesSeat(previousStatus);
+              final bool consumedAfter = _statusConsumesSeat(normalizedStatus);
+              if (consumedBefore != consumedAfter) {
+                final Map<String, dynamic> updatedOccupancy = _updatedOccupancy(
+                  segmentOccupancy: tripSegmentOccupancy,
+                  coveredKeys: coveredKeys,
+                  seats: booking.requestedSeats,
+                  increment: consumedAfter,
+                );
+                transaction.set(
+                  tripRef,
+                  <String, dynamic>{
+                    'segmentOccupancy': updatedOccupancy,
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  },
+                  SetOptions(merge: true),
+                );
+              }
             }
           } else if (!usesOccurrences) {
             final int availableSeats = _toInt(tripSnapshot.data()!['seats'], 0);
@@ -539,39 +659,86 @@ class VoyageBookingService {
           _normalizedTripFrequency(_toStringSafe(booking['tripFrequency']));
       final String tripDepartureDate = _toStringSafe(booking['tripDepartureDate']);
       final bool usesOccurrences = tripFrequency != 'none';
-      final Map<String, dynamic>? tripSegmentOccupancy =
-          tripSnap.data()!['segmentOccupancy'] is Map
-              ? Map<String, dynamic>.from(tripSnap.data()!['segmentOccupancy'] as Map)
-              : null;
+      final Map<String, dynamic> tripSegmentOccupancy = _parseSegmentOccupancy(
+        tripSnap.data()!['segmentOccupancy'],
+      );
       final List<String> tripSegmentPoints =
           (tripSnap.data()!['segmentPoints'] as List<dynamic>? ?? const <dynamic>[])
               .map((e) => e.toString().trim())
               .where((e) => e.isNotEmpty)
               .toList();
-      final bool usesSegments = tripSegmentOccupancy != null &&
-          tripSegmentOccupancy.isNotEmpty &&
-          tripSegmentPoints.length >= 2;
+      final bool usesSegments =
+          tripSegmentOccupancy.isNotEmpty && tripSegmentPoints.length >= 2;
 
       if (usesSegments) {
         final String segFrom = _toStringSafe(booking['segmentFrom']);
         final String segTo = _toStringSafe(booking['segmentTo']);
-        final List<String> coveredKeys = _coveredSegmentKeys(
-          segmentPoints: tripSegmentPoints,
-          segmentOccupancy: tripSegmentOccupancy,
-          from: segFrom,
-          to: segTo,
-        );
-        if (coveredKeys.isNotEmpty) {
-          final Map<String, dynamic> updatedOccupancy = _updatedOccupancy(
-            segmentOccupancy: tripSegmentOccupancy,
-            coveredKeys: coveredKeys,
-            seats: requestedSeats,
-            increment: false,
+        if (usesOccurrences && tripDepartureDate.isNotEmpty) {
+          final DocumentReference<Map<String, dynamic>> occRef =
+              _occurrenceRef(tripRef, tripDepartureDate);
+          final DocumentSnapshot<Map<String, dynamic>> occSnap =
+              await transaction.get(occRef);
+          final Map<String, dynamic>? occurrence =
+              occSnap.exists && occSnap.data() != null ? occSnap.data()! : null;
+          final Map<String, dynamic> occurrenceSegmentOccupancy =
+              _resolveOccurrenceSegmentOccupancy(
+            occurrence: occurrence,
+            fallbackSegmentOccupancy: tripSegmentOccupancy,
           );
-          transaction.update(tripRef, <String, dynamic>{
-            'segmentOccupancy': updatedOccupancy,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
+          final List<String> coveredKeys = _coveredSegmentKeys(
+            segmentPoints: tripSegmentPoints,
+            segmentOccupancy: occurrenceSegmentOccupancy,
+            from: segFrom,
+            to: segTo,
+          );
+          if (coveredKeys.isNotEmpty) {
+            final Map<String, dynamic> updatedOccupancy = _updatedOccupancy(
+              segmentOccupancy: occurrenceSegmentOccupancy,
+              coveredKeys: coveredKeys,
+              seats: requestedSeats,
+              increment: false,
+            );
+            final int capacity = occurrence == null
+                ? _toInt(tripSnap.data()!['seats'], 0)
+                : _toInt(occurrence['capacity'], _toInt(tripSnap.data()!['seats'], 0));
+            final int nextRemaining = _computeRemainingSeatsFromOccupancy(
+              segmentOccupancy: updatedOccupancy,
+              capacity: capacity,
+            );
+            transaction.set(
+              occRef,
+              <String, dynamic>{
+                'date': tripDepartureDate,
+                'capacity': capacity,
+                'segmentPoints': tripSegmentPoints,
+                'segmentOccupancy': updatedOccupancy,
+                'remainingSeats': nextRemaining,
+                'bookedSeats': capacity - nextRemaining,
+                'status': nextRemaining > 0 ? 'active' : 'full',
+                'updatedAt': FieldValue.serverTimestamp(),
+              },
+              SetOptions(merge: true),
+            );
+          }
+        } else {
+          final List<String> coveredKeys = _coveredSegmentKeys(
+            segmentPoints: tripSegmentPoints,
+            segmentOccupancy: tripSegmentOccupancy,
+            from: segFrom,
+            to: segTo,
+          );
+          if (coveredKeys.isNotEmpty) {
+            final Map<String, dynamic> updatedOccupancy = _updatedOccupancy(
+              segmentOccupancy: tripSegmentOccupancy,
+              coveredKeys: coveredKeys,
+              seats: requestedSeats,
+              increment: false,
+            );
+            transaction.update(tripRef, <String, dynamic>{
+              'segmentOccupancy': updatedOccupancy,
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+          }
         }
       } else if (usesOccurrences && tripDepartureDate.isNotEmpty) {
         final DocumentReference<Map<String, dynamic>> occRef =
@@ -727,6 +894,16 @@ class VoyageBookingService {
     return _toInt(snap.data()!['remainingSeats'], baseCapacity);
   }
 
+  Future<Map<String, dynamic>?> _readOccurrence({
+    required Transaction transaction,
+    required DocumentReference<Map<String, dynamic>> occurrenceRef,
+  }) async {
+    final DocumentSnapshot<Map<String, dynamic>> snap =
+        await transaction.get(occurrenceRef);
+    if (!snap.exists || snap.data() == null) return null;
+    return snap.data();
+  }
+
   DocumentReference<Map<String, dynamic>> _occurrenceRef(
     DocumentReference<Map<String, dynamic>> tripRef,
     String effectiveDepartureDate,
@@ -742,6 +919,34 @@ class VoyageBookingService {
     return int.tryParse('$value') ?? fallback;
   }
 
+  Map<String, dynamic> _parseSegmentOccupancy(Object? value) {
+    if (value is! Map) return <String, dynamic>{};
+    return Map<String, dynamic>.from(value);
+  }
+
+  Map<String, dynamic> _resolveOccurrenceSegmentOccupancy({
+    required Map<String, dynamic>? occurrence,
+    required Map<String, dynamic> fallbackSegmentOccupancy,
+  }) {
+    final Map<String, dynamic> occurrenceSegmentOccupancy = _parseSegmentOccupancy(
+      occurrence?['segmentOccupancy'],
+    );
+    if (occurrenceSegmentOccupancy.isNotEmpty) return occurrenceSegmentOccupancy;
+    return Map<String, dynamic>.from(fallbackSegmentOccupancy);
+  }
+
+  int _computeRemainingSeatsFromOccupancy({
+    required Map<String, dynamic> segmentOccupancy,
+    required int capacity,
+  }) {
+    int maxOccupied = 0;
+    for (final Object? value in segmentOccupancy.values) {
+      final int occupied = _toInt(value, 0);
+      if (occupied > maxOccupied) maxOccupied = occupied;
+    }
+    return (capacity - maxOccupied).clamp(0, capacity);
+  }
+
   /// Retourne les clés de tronçons couverts par un segment [from] → [to]
   /// en utilisant segmentPoints (array ordonné) pour éviter les problèmes d'ordre Firestore.
   List<String> _coveredSegmentKeys({
@@ -751,8 +956,12 @@ class VoyageBookingService {
     required String to,
   }) {
     if (segmentPoints.length < 2) return const <String>[];
-    final int fromIdx = segmentPoints.indexWhere((p) => p == from.trim());
-    final int toIdx = segmentPoints.indexWhere((p) => p == to.trim());
+    final int fromIdx = _findSegmentPointIndex(segmentPoints, from);
+    final int toIdx = _findSegmentPointIndex(
+      segmentPoints,
+      to,
+      afterIndex: fromIdx,
+    );
     if (fromIdx < 0 || toIdx < 0 || toIdx <= fromIdx) return const <String>[];
     final List<String> covered = <String>[];
     for (int i = fromIdx; i < toIdx; i++) {
@@ -790,6 +999,106 @@ class VoyageBookingService {
       updated[key] = increment ? current + seats : (current - seats).clamp(0, 1 << 30);
     }
     return updated;
+  }
+
+  int _findSegmentPointIndex(
+    List<String> segmentPoints,
+    String query, {
+    int afterIndex = -1,
+  }) {
+    final String normalizedQuery = query.trim();
+    if (normalizedQuery.isEmpty) return -1;
+    for (int i = 0; i < segmentPoints.length; i++) {
+      if (i <= afterIndex) continue;
+      if (_matchesAddressQuery(normalizedQuery, segmentPoints[i])) return i;
+    }
+    return -1;
+  }
+
+  bool _matchesAddressQuery(String queryAddress, String candidateAddress) {
+    final List<String> queryTokens = _addressTokens(queryAddress);
+    final List<String> candidateTokens = _addressTokens(candidateAddress);
+    if (queryTokens.isEmpty) return true;
+    if (candidateTokens.isEmpty) return false;
+
+    for (final String q in queryTokens) {
+      for (final String c in candidateTokens) {
+        if (_similarToken(c, q)) return true;
+      }
+    }
+    return false;
+  }
+
+  List<String> _addressTokens(String address) {
+    final List<String> out = <String>[];
+    final String first = _normalize(_cityToken(address));
+    if (first.isNotEmpty && !out.contains(first)) out.add(first);
+    for (final String part in address.split(',')) {
+      final String token = _normalize(part);
+      if (token.isNotEmpty && !out.contains(token)) out.add(token);
+    }
+    return out;
+  }
+
+  String _cityToken(String address) => (address.split(',').first).trim();
+
+  String _normalize(String value) {
+    String s = value.toLowerCase().trim();
+    const Map<String, String> map = <String, String>{
+      'a': '\u00E0\u00E1\u00E2\u00E3\u00E4\u00E5',
+      'c': '\u00E7',
+      'e': '\u00E8\u00E9\u00EA\u00EB',
+      'i': '\u00EC\u00ED\u00EE\u00EF',
+      'n': '\u00F1',
+      'o': '\u00F2\u00F3\u00F4\u00F5\u00F6',
+      'u': '\u00F9\u00FA\u00FB\u00FC',
+      'y': '\u00FD\u00FF',
+    };
+    map.forEach((ascii, chars) {
+      for (final String ch in chars.split('')) {
+        s = s.replaceAll(ch, ascii);
+      }
+    });
+    return s.replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String _normalizeLoose(String value) {
+    return _normalize(value)
+        .replaceAll(RegExp(r"[^a-z0-9\s]"), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  bool _similarToken(String a, String b) {
+    final String left = _normalizeLoose(a);
+    final String right = _normalizeLoose(b);
+    if (left.isEmpty || right.isEmpty) return false;
+    if (_isGenericGeoToken(left) || _isGenericGeoToken(right)) return false;
+
+    if (left == right) return true;
+    if (left.length >= 4 && right.length >= 4) {
+      if (left.startsWith(right) || right.startsWith(left)) return true;
+    }
+
+    final Set<String> leftWords =
+        left.split(' ').where((w) => w.length >= 4).toSet();
+    final Set<String> rightWords =
+        right.split(' ').where((w) => w.length >= 4).toSet();
+    if (leftWords.isNotEmpty && rightWords.isNotEmpty) {
+      for (final String lw in leftWords) {
+        if (rightWords.contains(lw)) return true;
+      }
+    }
+    return false;
+  }
+
+  bool _isGenericGeoToken(String value) {
+    final String v = _normalizeLoose(value);
+    return v.isEmpty ||
+        v == 'ci' ||
+        v == 'cote d ivoire' ||
+        v == 'cote divoire' ||
+        v == 'ivory coast';
   }
 }
 
