@@ -152,7 +152,6 @@ class _AddTripPageState extends State<AddTripPage> {
     _TripStep.driver,
     _TripStep.contact,
     _TripStep.vehicleInfo,
-    _TripStep.proCarrier,
     _TripStep.frequency,
     _TripStep.comfort,
     _TripStep.review,
@@ -190,6 +189,7 @@ class _AddTripPageState extends State<AddTripPage> {
   int _stepIndex = 0;
   bool _isForwardTransition = true;
   bool _isBus = false;
+  bool _carrierPromptActive = false;
   TransportCompany? _selectedCompany;
   List<TransportCompany> _companies = [];
   bool _isLoadingCompanies = false;
@@ -741,11 +741,15 @@ class _AddTripPageState extends State<AddTripPage> {
       );
       return;
     }
+    if (_steps[_stepIndex] == _TripStep.arrival) {
+      _offerCarrierPrompt();
+      return;
+    }
     if (_steps[_stepIndex] == _TripStep.stops) {
       final List<_IntermediateStop> routeStops = _intermediateStops
           .where((s) => s.selected && s.toStop == null)
           .toList();
-      if (routeStops.length >= 2) {
+      if (routeStops.isNotEmpty) {
         _offerSegmentConfig(routeStops);
         return;
       }
@@ -754,7 +758,9 @@ class _AddTripPageState extends State<AddTripPage> {
   }
 
   void _offerSegmentConfig(List<_IntermediateStop> routeStops) {
-    final String example = '${routeStops[0].address} → ${routeStops[1].address}';
+    final String example = routeStops.length >= 2
+        ? '${routeStops[0].address} → ${routeStops[1].address}'
+        : '${routeStops[0].address} → ${_arrivalController.text.trim()}';
     showDialog<void>(
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
@@ -783,6 +789,33 @@ class _AddTripPageState extends State<AddTripPage> {
   }
 
   void _openSegmentConfigSheet(List<_IntermediateStop> routeStops) {
+    final _IntermediateStop departureStop = _IntermediateStop(
+      id: 'dep_${_departureController.text.trim().replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase()}',
+      address: _departureController.text.trim(),
+      estimatedTime: _formatTime(_departureTime),
+      priceFromDeparture: 0,
+      lat: _departurePoint.lat,
+      lng: _departurePoint.lng,
+      selected: true,
+      source: 'route',
+      bookable: false,
+    );
+    final _IntermediateStop arrivalStop = _IntermediateStop(
+      id: 'arr_${_arrivalController.text.trim().replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase()}',
+      address: _arrivalController.text.trim(),
+      estimatedTime: '',
+      priceFromDeparture: 0,
+      lat: _arrivalPoint.lat,
+      lng: _arrivalPoint.lng,
+      selected: true,
+      source: 'route',
+      bookable: false,
+    );
+    final List<_IntermediateStop> allStops = <_IntermediateStop>[
+      departureStop,
+      ...routeStops,
+      arrivalStop,
+    ];
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -790,7 +823,7 @@ class _AddTripPageState extends State<AddTripPage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (BuildContext ctx) => _SegmentConfigSheet(
-        stops: routeStops,
+        stops: allStops,
         currency: _currency,
         existingSegments: _intermediateStops.where((s) => s.toStop != null).toList(),
         onSaved: (List<_IntermediateStop> segments) {
@@ -981,7 +1014,7 @@ class _AddTripPageState extends State<AddTripPage> {
     if (_stepIndex != 1) return;
     final String currentArrival = _arrivalController.text.trim();
     if (currentArrival.length < 5) return;
-    _setStepIndex(2, isForward: true);
+    _offerCarrierPrompt();
   }
 
   String _timeWithOffset(TimeOfDay base, int minutesOffset) {
@@ -1592,6 +1625,28 @@ class _AddTripPageState extends State<AddTripPage> {
     } finally {
       setState(() => _isLoadingCompanies = false);
     }
+  }
+
+  Future<void> _offerCarrierPrompt() async {
+    if (_carrierPromptActive) return;
+    _carrierPromptActive = true;
+    final ({bool confirmed, TransportCompany? company})? result =
+        await showModalBottomSheet<({bool confirmed, TransportCompany? company})>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _CarrierPromptSheet(
+        repository: _companyRepository,
+        initialSelection: _selectedCompany,
+      ),
+    );
+    _carrierPromptActive = false;
+    if (result == null || !mounted) return;
+    setState(() {
+      _isBus = result.confirmed && result.company != null;
+      _selectedCompany = result.confirmed ? result.company : null;
+    });
+    _setStepIndex((_stepIndex + 1).clamp(0, _steps.length - 1), isForward: true);
   }
 
   Future<void> _publishTrip() async {
@@ -3258,8 +3313,16 @@ class _SegmentConfigSheet extends StatefulWidget {
   State<_SegmentConfigSheet> createState() => _SegmentConfigSheetState();
 }
 
+class _SegmentEntry {
+  _SegmentEntry({required this.from, required this.to, required this.ctrl, required this.bookable});
+  final _IntermediateStop from;
+  final _IntermediateStop to;
+  final TextEditingController ctrl;
+  bool bookable;
+}
+
 class _SegmentConfigSheetState extends State<_SegmentConfigSheet> {
-  late final List<({_IntermediateStop from, _IntermediateStop to, TextEditingController ctrl})> _segments;
+  late final List<_SegmentEntry> _segments;
 
   @override
   void initState() {
@@ -3273,12 +3336,13 @@ class _SegmentConfigSheetState extends State<_SegmentConfigSheet> {
         final _IntermediateStop? existing = widget.existingSegments
             .where((s) => s.address == from.address && s.toStop == to.address)
             .firstOrNull;
-        _segments.add((
+        _segments.add(_SegmentEntry(
           from: from,
           to: to,
           ctrl: TextEditingController(
             text: existing != null ? existing.priceFromDeparture.toStringAsFixed(0) : '0',
           ),
+          bookable: existing?.bookable ?? true,
         ));
       }
     }
@@ -3305,7 +3369,7 @@ class _SegmentConfigSheetState extends State<_SegmentConfigSheet> {
         lng: seg.from.lng,
         selected: true,
         source: 'segment',
-        bookable: true,
+        bookable: seg.bookable,
         toStop: seg.to.address,
       );
     }).toList();
@@ -3315,91 +3379,379 @@ class _SegmentConfigSheetState extends State<_SegmentConfigSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.85,
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+          left: 16,
+          right: 16,
+          top: 16,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Prix entre arrêts intermédiaires',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Définissez le prix pour chaque segment entre arrêts.',
+              style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: _segments.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (_, int i) {
+                  final seg = _segments[i];
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              '${seg.from.address} → ${seg.to.address}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13.5,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 110,
+                            child: TextFormField(
+                              controller: seg.ctrl,
+                              keyboardType: TextInputType.number,
+                              enabled: seg.bookable,
+                              decoration: InputDecoration(
+                                labelText: widget.currency,
+                                border: const OutlineInputBorder(),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 10,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: <Widget>[
+                          Switch(
+                            value: seg.bookable,
+                            onChanged: (bool v) => setState(() => seg.bookable = v),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            seg.bookable ? 'Réservable' : 'Non réservable',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: seg.bookable ? const Color(0xFF0F766E) : Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _save,
+                child: const Text('Enregistrer et continuer'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+// ─── Carrier prompt sheet ─────────────────────────────────────────────────────
+
+class _CarrierPromptSheet extends StatefulWidget {
+  const _CarrierPromptSheet({
+    required this.repository,
+    this.initialSelection,
+  });
+
+  final TransportCompanyRepository repository;
+  final TransportCompany? initialSelection;
+
+  @override
+  State<_CarrierPromptSheet> createState() => _CarrierPromptSheetState();
+}
+
+class _CarrierPromptSheetState extends State<_CarrierPromptSheet> {
+  List<TransportCompany> _companies = [];
+  bool _loading = true;
+  bool _showList = false;
+  TransportCompany? _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.initialSelection;
+    _showList = widget.initialSelection != null;
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final list = await widget.repository.fetchEnabled();
+      if (mounted) setState(() => _companies = list);
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-        left: 16,
-        right: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        left: 24,
+        right: 24,
         top: 16,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
+          const Icon(Icons.directions_bus_rounded, size: 40, color: Color(0xFF0F766E)),
+          const SizedBox(height: 12),
           const Text(
-            'Prix entre arrêts intermédiaires',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            'Soci\u00E9t\u00E9 de transport\u00A0?',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 4),
-          const Text(
-            'Définissez le prix pour chaque segment entre arrêts.',
-            style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+          const SizedBox(height: 6),
+          Text(
+            'Vous repr\u00E9sentez une compagnie de transport professionnelle\u00A0?',
+            style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+            textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 16),
-          ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.45,
-            ),
-            child: ListView.separated(
-              shrinkWrap: true,
-              itemCount: _segments.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (_, int i) {
-                final seg = _segments[i];
-                return Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: Text(
-                        '${seg.from.address} → ${seg.to.address}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13.5,
-                        ),
+          const SizedBox(height: 24),
+          if (!_showList) ...<Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context)
+                        .pop((confirmed: false, company: null)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      width: 110,
-                      child: TextFormField(
-                        controller: seg.ctrl,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                          labelText: widget.currency,
-                          border: const OutlineInputBorder(),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 10,
+                    child: const Text('Non, continuer'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => setState(() => _showList = true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF0F766E),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Oui, choisir'),
+                  ),
+                ),
+              ],
+            ),
+          ] else ...<Widget>[
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: CircularProgressIndicator(),
+              )
+            else if (_companies.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  'Aucune compagnie disponible.',
+                  style: TextStyle(color: Colors.grey[500]),
+                ),
+              )
+            else
+              SizedBox(
+                height: 110,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _companies.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  itemBuilder: (_, int i) {
+                    final TransportCompany c = _companies[i];
+                    final bool isSelected = _selected?.id == c.id;
+                    return GestureDetector(
+                      onTap: () => setState(() => _selected = c),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: 90,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? const Color(0xFF0F766E).withValues(alpha: 0.08)
+                              : Colors.grey[50],
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isSelected
+                                ? const Color(0xFF0F766E)
+                                : Colors.grey[200]!,
+                            width: isSelected ? 2 : 1,
                           ),
                         ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: <Widget>[
+                            if (c.imageUrl != null)
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  c.imageUrl!,
+                                  width: 48,
+                                  height: 48,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) =>
+                                      _CompanyInitial(name: c.name),
+                                ),
+                              )
+                            else
+                              _CompanyInitial(name: c.name),
+                            const SizedBox(height: 6),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              child: Text(
+                                c.name,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: isSelected
+                                      ? const Color(0xFF0F766E)
+                                      : const Color(0xFF0F172A),
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            const SizedBox(height: 20),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => setState(() {
+                      _showList = false;
+                      _selected = null;
+                    }),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                  ],
-                );
-              },
+                    child: const Text('Retour'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _selected != null
+                        ? () => Navigator.of(context)
+                            .pop((confirmed: true, company: _selected))
+                        : null,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF0F766E),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Confirmer'),
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: _save,
-              child: const Text('Enregistrer et continuer'),
-            ),
-          ),
+          ],
         ],
       ),
     );
   }
 }
 
+class _CompanyInitial extends StatelessWidget {
+  const _CompanyInitial({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final String initial =
+        name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : 'C';
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F766E).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Center(
+        child: Text(
+          initial,
+          style: const TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF0F766E),
+          ),
+        ),
+      ),
+    );
+  }
+}

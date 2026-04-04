@@ -46,6 +46,7 @@ class VoyageBookingService {
       final String effectiveDepartureDate =
           _resolveEffectiveDepartureDate(input, trip);
       final bool usesOccurrences = tripFrequency != 'none';
+      final bool isBus = trip['isBus'] == true;
 
       final String? tripError = validateVoyageTripForBooking(
         trip: trip,
@@ -192,7 +193,7 @@ class VoyageBookingService {
           'paymentDiscount': input.paymentDiscount,
         'unreadForDriver': 0,
         'unreadForPassenger': 0,
-        'status': 'pending',
+        'status': isBus ? 'accepted' : 'pending',
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };
