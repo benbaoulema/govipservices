@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:govipservices/features/travel/presentation/pages/trip_detail_page.dart';
+import 'package:govipservices/features/travel/presentation/widgets/trip_detail_display_widgets.dart';
 
 void main() {
   testWidgets('TripBookingPanel desactive le bouton reserver si canBook=false', (WidgetTester tester) async {

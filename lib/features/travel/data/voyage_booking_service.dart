@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:govipservices/features/notifications/data/firestore_notifications_repository.dart';
 import 'package:govipservices/features/notifications/domain/models/app_notification.dart';
 import 'package:govipservices/features/travel/domain/models/voyage_booking_models.dart';
@@ -17,7 +18,65 @@ class VoyageBookingService {
   final FirebaseFirestore _firestore;
   final FirestoreNotificationsRepository _notificationsRepository;
 
+  /// Mettre à true pour router createBooking vers la Cloud Function.
+  /// false = ancien comportement Dart (logique locale).
+  static bool useCloudFunction = false;
+
+  final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'europe-west1');
+
   Future<VoyageBookingDocument> createBooking(CreateVoyageBookingInput input) async {
+    if (useCloudFunction) return _createBookingViaCloudFunction(input);
+    return _createBookingLocally(input);
+  }
+
+  // ── Cloud Function path ────────────────────────────────────────────────────
+
+  Future<VoyageBookingDocument> _createBookingViaCloudFunction(
+    CreateVoyageBookingInput input,
+  ) async {
+    final HttpsCallable callable = _functions.httpsCallable('createVoyageBooking');
+    try {
+      final HttpsCallableResult<dynamic> result = await callable.call(<String, dynamic>{
+        'source': 'mobile',
+        'tripId': input.tripId,
+        'requestedSeats': input.requestedSeats,
+        'requesterName': input.requesterName,
+        'requesterContact': input.requesterContact,
+        'requesterEmail': input.requesterEmail ?? '',
+        'requesterTrackNum': input.requesterTrackNum ?? '',
+        'segmentFrom': input.segmentFrom,
+        'segmentTo': input.segmentTo,
+        'travelers': input.travelers.map((t) => t.toMap()).toList(),
+        'idempotencyKey': input.idempotencyKey ?? '',
+        'effectiveDepartureDate': input.effectiveDepartureDate ?? '',
+        'comfortOptions': input.comfortOptions,
+        'appliedRewardIds': input.appliedRewardIds,
+        'studentDiscount': input.studentDiscount,
+        'checkoutDiscount': input.checkoutDiscount,
+        'paymentDiscount': input.paymentDiscount,
+      });
+
+      final Map<String, dynamic> data =
+          Map<String, dynamic>.from(result.data as Map);
+      final String bookingId = (data['bookingId'] as String? ?? '').trim();
+      if (bookingId.isEmpty) throw Exception('Réponse invalide de la fonction de réservation.');
+
+      // Lecture du doc complet pour retourner un VoyageBookingDocument.
+      final DocumentSnapshot<Map<String, dynamic>> snap =
+          await _firestore.collection('voyageBookings').doc(bookingId).get();
+      if (!snap.exists || snap.data() == null) {
+        throw Exception('Réservation créée mais introuvable.');
+      }
+      return VoyageBookingDocument.fromMap(snap.id, snap.data()!);
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception(e.message ?? 'Erreur lors de la réservation.');
+    }
+  }
+
+  // ── Local path (ancien comportement) ──────────────────────────────────────
+
+  Future<VoyageBookingDocument> _createBookingLocally(CreateVoyageBookingInput input) async {
     final String? inputError = validateCreateVoyageBookingInput(input);
     if (inputError != null) throw Exception(inputError);
 

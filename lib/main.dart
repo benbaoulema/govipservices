@@ -10,6 +10,7 @@ import 'package:govipservices/firebase/firebase_options_dev.dart';
 import 'package:govipservices/firebase/firebase_options_prod.dart';
 import 'package:govipservices/features/notifications/presentation/fcm_service.dart';
 import 'package:govipservices/features/travel/presentation/services/go_radar_reminder_service.dart';
+import 'package:govipservices/features/travel/data/voyage_booking_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +41,7 @@ Future<void> main() async {
     ),
   );
 
+  VoyageBookingService.useCloudFunction = true;
   runApp(const GoVipApp());
   if (firebaseReady) {
     unawaited(
