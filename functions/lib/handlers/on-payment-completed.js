@@ -14,7 +14,7 @@ exports.onPaymentCompleted = (0, firestore_1.onDocumentUpdated)({
     document: "voyageBookings/{bookingId}",
     region: "europe-west1",
 }, async (event) => {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const before = (_b = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before) === null || _b === void 0 ? void 0 : _b.data();
     const after = (_d = (_c = event.data) === null || _c === void 0 ? void 0 : _c.after) === null || _d === void 0 ? void 0 : _d.data();
     if (!before || !after)
@@ -24,9 +24,9 @@ exports.onPaymentCompleted = (0, firestore_1.onDocumentUpdated)({
     // Only fire on transition to 'confirmed'
     if (newStatus !== "confirmed" || prevStatus === "confirmed")
         return;
-    const uid = `${(_g = after.userId) !== null && _g !== void 0 ? _g : ""}`.trim();
+    const uid = `${(_h = (_g = after.requesterUid) !== null && _g !== void 0 ? _g : after.userId) !== null && _h !== void 0 ? _h : ""}`.trim();
     if (!uid) {
-        logger.warn("Booking has no userId", { bookingId: event.params.bookingId });
+        logger.warn("Booking has no requesterUid/userId", { bookingId: event.params.bookingId });
         return;
     }
     const totalPrice = typeof after.totalPrice === "number" ? after.totalPrice : 0;

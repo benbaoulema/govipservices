@@ -26,9 +26,9 @@ export const onPaymentCompleted = onDocumentUpdated(
     // Only fire on transition to 'confirmed'
     if (newStatus !== "confirmed" || prevStatus === "confirmed") return;
 
-    const uid = `${after.userId ?? ""}`.trim();
+    const uid = `${after.requesterUid ?? after.userId ?? ""}`.trim();
     if (!uid) {
-      logger.warn("Booking has no userId", { bookingId: event.params.bookingId });
+      logger.warn("Booking has no requesterUid/userId", { bookingId: event.params.bookingId });
       return;
     }
 

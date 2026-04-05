@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.redeemReward = exports.revealScratchCard = exports.onDriverWalletTopup = exports.onPaymentCompleted = exports.registerAppLaunch = exports.sendPushOnNotificationCreated = void 0;
+exports.createVoyageBooking = exports.notifyTripPassengers = exports.redeemReward = exports.revealScratchCard = exports.onDriverWalletTopup = exports.onPaymentCompleted = exports.registerAppLaunch = exports.sendPushOnNotificationCreated = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
 const logger = __importStar(require("firebase-functions/logger"));
 const admin = __importStar(require("firebase-admin"));
@@ -205,4 +205,8 @@ var reveal_scratch_card_1 = require("./handlers/reveal-scratch-card");
 Object.defineProperty(exports, "revealScratchCard", { enumerable: true, get: function () { return reveal_scratch_card_1.revealScratchCard; } });
 var redeem_reward_1 = require("./handlers/redeem-reward");
 Object.defineProperty(exports, "redeemReward", { enumerable: true, get: function () { return redeem_reward_1.redeemReward; } });
+var notify_trip_passengers_1 = require("./handlers/notify-trip-passengers");
+Object.defineProperty(exports, "notifyTripPassengers", { enumerable: true, get: function () { return notify_trip_passengers_1.notifyTripPassengers; } });
+var create_voyage_booking_1 = require("./handlers/create-voyage-booking");
+Object.defineProperty(exports, "createVoyageBooking", { enumerable: true, get: function () { return create_voyage_booking_1.createVoyageBooking; } });
 //# sourceMappingURL=index.js.map
