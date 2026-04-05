@@ -32,6 +32,8 @@ interface CreateVoyageBookingPayload {
   studentDiscount?: number;
   checkoutDiscount?: number;
   paymentDiscount?: number;
+  /** 'wave' | 'orange_money' | 'cash' | '' */
+  paymentMethod?: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -442,6 +444,7 @@ export const createVoyageBooking = onCall(
         ...(rawStudentDiscount > 0 && { studentDiscount: rawStudentDiscount }),
         ...(rawCheckoutDiscount > 0 && { checkoutDiscount: rawCheckoutDiscount }),
         ...(rawPaymentDiscount > 0 && { paymentDiscount: rawPaymentDiscount }),
+        ...(toStr(payload.paymentMethod) && { paymentMethod: toStr(payload.paymentMethod) }),
         source,
         unreadForDriver: 0,
         unreadForPassenger: 0,

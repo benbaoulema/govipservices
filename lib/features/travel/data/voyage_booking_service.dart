@@ -55,6 +55,7 @@ class VoyageBookingService {
         'studentDiscount': input.studentDiscount,
         'checkoutDiscount': input.checkoutDiscount,
         'paymentDiscount': input.paymentDiscount,
+        'paymentMethod': input.paymentMethod,
       });
 
       final Map<String, dynamic> data =
@@ -250,6 +251,8 @@ class VoyageBookingService {
           'checkoutDiscount': input.checkoutDiscount,
         if (input.paymentDiscount > 0)
           'paymentDiscount': input.paymentDiscount,
+        if (input.paymentMethod.isNotEmpty)
+          'paymentMethod': input.paymentMethod,
         'unreadForDriver': 0,
         'unreadForPassenger': 0,
         'status': isBus ? 'accepted' : 'pending',

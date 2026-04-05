@@ -42,6 +42,7 @@ class CreateVoyageBookingInput {
     this.studentDiscount = 0,
     this.checkoutDiscount = 0,
     this.paymentDiscount = 0,
+    this.paymentMethod = '',
   });
 
   final String tripId;
@@ -62,6 +63,8 @@ class CreateVoyageBookingInput {
   final int checkoutDiscount;
   /// Remise carte à gratter Wave paiement (non persistée en user_rewards).
   final int paymentDiscount;
+  /// Moyen de paiement : 'wave', 'orange_money', 'cash'
+  final String paymentMethod;
   final String segmentFrom;
   final String segmentTo;
   final int segmentPrice;
@@ -106,6 +109,7 @@ class VoyageBookingDocument {
     this.studentDiscount = 0,
     this.checkoutDiscount = 0,
     this.paymentDiscount = 0,
+    this.paymentMethod = '',
     this.createdAt,
     this.updatedAt,
   });
@@ -150,6 +154,8 @@ class VoyageBookingDocument {
   final int checkoutDiscount;
   /// Réduction bonus Wave.
   final int paymentDiscount;
+  /// Moyen de paiement : 'wave', 'orange_money', 'cash'
+  final String paymentMethod;
   final Timestamp? createdAt;
   final Timestamp? updatedAt;
 
@@ -186,6 +192,7 @@ class VoyageBookingDocument {
       'unreadForPassenger': unreadForPassenger,
       'status': status,
       'comfortOptions': comfortOptions,
+      if (paymentMethod.isNotEmpty) 'paymentMethod': paymentMethod,
       'createdAt': createdAt,
       'updatedAt': updatedAt,
     };
@@ -238,6 +245,7 @@ class VoyageBookingDocument {
       studentDiscount: (map['studentDiscount'] as num? ?? 0).toInt(),
       checkoutDiscount: (map['checkoutDiscount'] as num? ?? 0).toInt(),
       paymentDiscount: (map['paymentDiscount'] as num? ?? 0).toInt(),
+      paymentMethod: (map['paymentMethod'] as String? ?? '').trim(),
       createdAt: map['createdAt'] as Timestamp?,
       updatedAt: map['updatedAt'] as Timestamp?,
     );

@@ -18,10 +18,13 @@ class PaymentResult {
     this.studentDiscount = 0,
     this.checkoutDiscount = 0,
     this.paymentDiscount = 0,
+    this.paymentMethod = '',
   });
   final int studentDiscount;
   final int checkoutDiscount;
   final int paymentDiscount;
+  /// 'wave', 'orange_money', 'cash' ou '' si réservation gratuite
+  final String paymentMethod;
 }
 
 enum PaymentMethod { wave, orangeMoney, cash }
@@ -132,6 +135,7 @@ class _PaymentSheetState extends State<PaymentSheet> {
     Navigator.of(context).pop(PaymentResult(
       studentDiscount: _studentDiscount,
       checkoutDiscount: _checkoutDiscount,
+      paymentMethod: 'cash',
     ));
   }
 
@@ -527,7 +531,8 @@ class _PaymentSheetState extends State<PaymentSheet> {
                     onPressed: () => Navigator.of(context).pop(PaymentResult(
                         studentDiscount: _studentDiscount,
                         checkoutDiscount: _checkoutDiscount,
-                        paymentDiscount: _paymentDiscount)),
+                        paymentDiscount: _paymentDiscount,
+                        paymentMethod: '')),
                     icon: const Icon(Icons.check_circle_rounded),
                     label: const Text('Réserver gratuitement'),
                   ),
@@ -608,7 +613,8 @@ class _PaymentSheetState extends State<PaymentSheet> {
                           : () => Navigator.of(context).pop(PaymentResult(
                               studentDiscount: _studentDiscount,
                               checkoutDiscount: _checkoutDiscount,
-                              paymentDiscount: _paymentDiscount)),
+                              paymentDiscount: _paymentDiscount,
+                              paymentMethod: _method == PaymentMethod.wave ? 'wave' : 'orange_money')),
                       icon: const Icon(Icons.check_circle_rounded),
                       label: const Text('Payer et Réserver'),
                     ),

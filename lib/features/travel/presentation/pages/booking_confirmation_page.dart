@@ -244,6 +244,7 @@ class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
           studentDiscount: paymentResult.studentDiscount,
           checkoutDiscount: paymentResult.checkoutDiscount,
           paymentDiscount: paymentResult.paymentDiscount,
+          paymentMethod: paymentResult.paymentMethod,
           segmentFrom: widget.segment.departureNode.address,
           segmentTo: widget.segment.arrivalNode.address,
           segmentPrice: widget.segment.segmentPrice,
