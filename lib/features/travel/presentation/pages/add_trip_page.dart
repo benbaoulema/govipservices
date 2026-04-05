@@ -62,6 +62,7 @@ class _IntermediateStop {
     this.source = 'manual',
     this.bookable = true,
     this.toStop,
+    this.timeManuallySet = false,
   });
 
   final String id;
@@ -75,6 +76,9 @@ class _IntermediateStop {
   final bool bookable;
   /// Null = vers la destination finale. Non-null = vers un arrêt intermédiaire.
   final String? toStop;
+  /// True si l'utilisateur a explicitement choisi l'heure via le picker.
+  /// False = heure calculée auto depuis l'heure de départ + ETA route.
+  final bool timeManuallySet;
 
   _IntermediateStop copyWith({
     String? id,
@@ -87,6 +91,7 @@ class _IntermediateStop {
     String? source,
     bool? bookable,
     String? toStop,
+    bool? timeManuallySet,
   }) {
     return _IntermediateStop(
       id: id ?? this.id,
@@ -99,6 +104,7 @@ class _IntermediateStop {
       source: source ?? this.source,
       bookable: bookable ?? this.bookable,
       toStop: toStop ?? this.toStop,
+      timeManuallySet: timeManuallySet ?? this.timeManuallySet,
     );
   }
 }
@@ -1137,12 +1143,15 @@ class _AddTripPageState extends State<AddTripPage> {
           return _IntermediateStop(
             id: _stop.id,
             address: _stop.address,
-            estimatedTime: prev?.estimatedTime ?? _timeWithOffset(base, _stop.etaMinutesFromDeparture),
+            estimatedTime: (prev?.timeManuallySet == true)
+                ? prev!.estimatedTime
+                : _timeWithOffset(base, _stop.etaMinutesFromDeparture),
             priceFromDeparture: prev?.priceFromDeparture ?? _stop.priceFromDeparture,
             lat: _stop.lat,
             lng: _stop.lng,
             selected: prev?.selected ?? false,
             source: 'route',
+            timeManuallySet: prev?.timeManuallySet ?? false,
           );
         }).toList(growable: false);
 
@@ -1578,7 +1587,10 @@ class _AddTripPageState extends State<AddTripPage> {
     );
     if (picked == null) return;
     setState(() {
-      _intermediateStops[idx] = current.copyWith(estimatedTime: _formatTime(picked));
+      _intermediateStops[idx] = current.copyWith(
+        estimatedTime: _formatTime(picked),
+        timeManuallySet: true,
+      );
     });
   }
 
